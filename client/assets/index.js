@@ -812,7 +812,9 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       });
     });
 
-  // opts.fileIndex picks the video to open (used by "Continue watching")
+  // opts.fileIndex picks the video to open (used by "Continue watching");
+  // opts.episode = {imdb, title, season, episode} picks that episode's file
+  // (needed for season packs)
   async function startPlayback(opts = {}) {
     const magnet = document.querySelector("#magnet").value;
 
@@ -920,8 +922,31 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       return;
     }
 
-    const initialFile =
+    let initialFile =
       videoFiles.find((f) => f.index === opts.fileIndex) || videoFiles[0];
+    if (opts.episode) {
+      const { season, episode } = opts.episode;
+      const match = findEpisodeFile(videoFiles, season, episode);
+      if (!match) {
+        butterup.toast({
+          message: `${episodeCode(season, episode)} was not found in this torrent, try another one`,
+          location: "top-right",
+          icon: true,
+          dismissable: true,
+          type: "error",
+        });
+        form.querySelector("button[type=submit]").removeAttribute("disabled");
+        form.querySelector("button[type=submit]").innerHTML = "Play Now";
+        form.querySelector("button[type=submit]").classList.remove("loader");
+        document.querySelectorAll(".play-torrent").forEach((el) => {
+          el.removeAttribute("disabled");
+          el.innerHTML = "Watch";
+          el.classList.remove("loader");
+        });
+        return;
+      }
+      initialFile = match;
+    }
 
     const subtitleFiles = files.filter((f) =>
       f.name.match(/\.(srt|vtt|sub)$/i)
@@ -1289,9 +1314,9 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
   // from https URLs.
   const GROUP_TORRENTS_SHOWN = 4;
 
-  const playFromButton = (btn, magnet) => {
+  const playFromButton = (btn, magnet, opts = {}) => {
     document.querySelector("#magnet").value = magnet;
-    startPlayback();
+    startPlayback(opts);
     btn.setAttribute("disabled", "disabled");
     btn.innerHTML = "";
     btn.classList.add("loader");
@@ -1316,7 +1341,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     return box;
   };
 
-  const buildTorrentRow = (result) => {
+  const buildTorrentRow = (result, opts = {}) => {
     const row = document.createElement("div");
     row.className = "flex items-center gap-3";
 
@@ -1344,15 +1369,16 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     watchBtn.className = "btn small shrink-0 play-torrent"; // reset by startPlayback on failure
     watchBtn.textContent = "Watch";
     watchBtn.addEventListener("click", () =>
-      playFromButton(watchBtn, result.downloadUrl || result.magnetUrl || "")
+      playFromButton(watchBtn, result.downloadUrl || result.magnetUrl || "", opts)
     );
 
     row.append(text, watchBtn);
     return row;
   };
 
-  // title, year, rating, type, IMDb link and genres of a title
-  const buildMetaHeader = (meta) => {
+  // title, year, rating, type, IMDb link and genres of a title; series get
+  // an "Episodes" button unless opts.episodes === false
+  const buildMetaHeader = (meta, opts = {}) => {
     const wrap = document.createElement("div");
     wrap.className = "flex flex-col";
     wrap.style.gap = "4px"; // gap-1 is not in the compiled CSS
@@ -1380,6 +1406,14 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         link.rel = "noopener noreferrer";
         link.textContent = `IMDb ${meta.imdb}`;
         header.appendChild(link);
+        if (meta.type === "series" && opts.episodes !== false) {
+          const eps = document.createElement("button");
+          eps.type = "button";
+          eps.className = "btn small shrink-0";
+          eps.textContent = "Episodes";
+          eps.addEventListener("click", () => openSeries(meta));
+          header.appendChild(eps);
+        }
       }
     }
     wrap.appendChild(header);
@@ -1393,14 +1427,14 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
   };
 
   // torrent rows with a "Show N more" toggle
-  const buildTorrentList = (results, shownByDefault = GROUP_TORRENTS_SHOWN) => {
+  const buildTorrentList = (results, shownByDefault = GROUP_TORRENTS_SHOWN, opts = {}) => {
     const list = document.createElement("div");
     list.className = "flex flex-col gap-2";
     let expanded = false;
     const renderRows = () => {
       list.innerHTML = "";
       const shown = expanded ? results : results.slice(0, shownByDefault);
-      shown.forEach((r) => list.appendChild(buildTorrentRow(r)));
+      shown.forEach((r) => list.appendChild(buildTorrentRow(r, opts)));
       if (results.length > shownByDefault) {
         const more = document.createElement("button");
         more.type = "button";
@@ -1459,6 +1493,307 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       searchData.length,
       "#search-pagination"
     );
+  };
+
+  // Series view (server: series.go): seasons, episodes and an automatic
+  // torrent per episode, with the other candidates (episode torrents and
+  // season packs) one click away. startPlayback({episode}) picks the right
+  // file inside a pack.
+  const seriesView = { meta: null, info: null, season: null, torrents: {}, token: 0 };
+
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const episodeCode = (s, e) => `S${pad2(s)}E${pad2(e)}`;
+  const qualityLabel = (name) => (name.match(/\b(2160p|1080p|720p|480p)\b/i) || [])[1] || "";
+
+  // the video of season s / episode e inside a torrent's file list, or null
+  const findEpisodeFile = (files, s, e) => {
+    const usable = files.filter((f) => !/(^|[^a-z])sample([^a-z]|$)/i.test(f.name));
+    const sxe = new RegExp(`(^|[^a-z0-9])s0*${s}[ ._-]*e0*${e}(?![0-9])`, "i");
+    const nxn = new RegExp(`(^|[^0-9])${s}x0*${e}(?![0-9])`, "i");
+    let hits = usable.filter((f) => sxe.test(f.name) || nxn.test(f.name));
+    if (!hits.length) {
+      // "Season 2/05 - Name.mkv"
+      const seasonDir = new RegExp(`(season|s)[ ._-]*0*${s}(?![0-9])[^/]*/`, "i");
+      const lead = new RegExp(`^(e|ep|episode)?[ ._-]*0*${e}(?![0-9])`, "i");
+      hits = usable.filter(
+        (f) => seasonDir.test(f.name) && lead.test(f.name.split("/").pop())
+      );
+    }
+    if (!hits.length && usable.length === 1) {
+      hits = usable; // a single-episode torrent named differently
+    }
+    return hits.sort((a, b) => (b.size || 0) - (a.size || 0))[0] || null;
+  };
+
+  const searchManually = (query) => {
+    document.querySelector("#search").value = query;
+    document.querySelector("#search-category").value = "tv";
+    document.querySelector("#search-form").requestSubmit();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const buildEpisodeRow = (season, ep) => {
+    const meta = seriesView.meta;
+    const row = document.createElement("div");
+    row.className = "flex gap-3 p-3 border-b";
+    if (!ep.aired) {
+      row.style.opacity = "0.6";
+    }
+
+    const thumb = document.createElement("div");
+    thumb.className = "bg-muted rounded-md overflow-hidden shrink-0";
+    thumb.style.cssText = "width:128px;height:72px";
+    if (ep.thumbnail && ep.thumbnail.startsWith("https://")) {
+      const img = document.createElement("img");
+      img.src = ep.thumbnail;
+      img.alt = "";
+      img.loading = "lazy";
+      img.referrerPolicy = "no-referrer";
+      img.style.cssText = "width:100%;height:100%;object-fit:cover";
+      img.addEventListener("error", () => img.remove());
+      thumb.appendChild(img);
+    }
+
+    const body = document.createElement("div");
+    body.className = "flex flex-col flex-1 min-w-0";
+    body.style.gap = "4px";
+    const title = document.createElement("span");
+    title.className = "text-sm font-semibold";
+    title.style.cssText = ellipsis;
+    title.textContent = `E${pad2(ep.episode)} · ${ep.name}`;
+    title.title = ep.name;
+    const date = document.createElement("span");
+    date.className = "text-xs text-muted-foreground";
+    date.textContent = [ep.released, ep.aired ? "" : "Not aired yet"]
+      .filter(Boolean)
+      .join(" · ");
+    body.append(title, date);
+    if (ep.overview) {
+      const overview = document.createElement("span");
+      overview.className = "text-xs text-muted-foreground";
+      overview.style.cssText =
+        "display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden";
+      overview.textContent = ep.overview;
+      overview.title = ep.overview;
+      body.appendChild(overview);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "flex items-center gap-2";
+    actions.style.flexWrap = "wrap";
+    const watch = document.createElement("button");
+    watch.type = "button";
+    watch.className = "btn small shrink-0";
+    watch.textContent = "Watch";
+    watch.setAttribute("disabled", "disabled"); // until torrents arrive
+    const note = document.createElement("span");
+    note.className = "text-xs text-muted-foreground";
+    note.style.cssText = ellipsis;
+    actions.append(watch, note);
+    body.appendChild(actions);
+
+    const others = document.createElement("div");
+    others.className = "hidden flex flex-col gap-2";
+    others.style.marginTop = "6px";
+    body.appendChild(others);
+
+    row.append(thumb, body);
+
+    const episodeOpts = {
+      episode: { imdb: meta.imdb, title: meta.title, season, episode: ep.episode },
+    };
+    const searchLink = (label) => {
+      const a = document.createElement("button");
+      a.type = "button";
+      a.className = "text-xs text-primary cursor-pointer";
+      a.style.alignSelf = "flex-start";
+      a.textContent = label;
+      a.addEventListener("click", () =>
+        searchManually(`${meta.title} ${episodeCode(season, ep.episode)}`)
+      );
+      return a;
+    };
+
+    const setTorrents = (list) => {
+      const key = String(ep.episode);
+      const episodeTorrents = list?.episodes?.[key] || [];
+      const packs = list?.packs || [];
+      // no torrent of its own: the best season pack (ranked by the server)
+      const best =
+        list?.best?.[key] || (packs[0] ? { pack: true, torrent: packs[0] } : null);
+      if (!best) {
+        watch.remove(); // keeps startPlayback from re-enabling it
+        note.textContent = list ? "No torrents found" : "Torrents unavailable";
+        actions.appendChild(searchLink("Search"));
+        return;
+      }
+      watch.classList.add("play-torrent"); // reset by startPlayback
+      watch.removeAttribute("disabled");
+      watch.addEventListener("click", () =>
+        playFromButton(
+          watch,
+          best.torrent.downloadUrl || best.torrent.magnetUrl || "",
+          episodeOpts
+        )
+      );
+      note.textContent = [
+        best.pack ? "Season pack" : "",
+        qualityLabel(best.torrent.title),
+        `${best.torrent.seeders ?? 0} seeders`,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      note.title = best.torrent.title;
+
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "text-xs text-primary cursor-pointer";
+      toggle.textContent = "Other torrents";
+      toggle.addEventListener("click", () => {
+        if (others.childElementCount === 0) {
+          const section = (label, results) => {
+            const h = document.createElement("span");
+            h.className = "text-xs font-semibold text-muted-foreground";
+            h.textContent = label;
+            others.append(h, buildTorrentList(results, 4, episodeOpts));
+          };
+          if (episodeTorrents.length) section("This episode", episodeTorrents);
+          if (packs.length) section("Season packs", packs);
+          others.appendChild(searchLink("Search for more"));
+        }
+        others.classList.toggle("hidden");
+      });
+      actions.appendChild(toggle);
+    };
+
+    return { el: row, setTorrents };
+  };
+
+  const selectSeason = async (n) => {
+    const token = seriesView.token;
+    seriesView.season = n;
+    document.querySelectorAll(".series-season").forEach((b) => {
+      const on = b.dataset.season === String(n);
+      b.classList.toggle("bg-primary", on);
+      b.classList.toggle("text-primary-foreground", on);
+      b.classList.toggle("bg-muted", !on);
+    });
+    const list = document.querySelector("#series-episodes");
+    const status = document.querySelector("#series-status");
+    list.innerHTML = "";
+    const season = seriesView.info.seasons.find((s) => s.season === n);
+    const rows = (season?.episodes || []).map((ep) => buildEpisodeRow(n, ep));
+    rows.forEach((r) => list.appendChild(r.el));
+    list.lastElementChild?.classList.remove("border-b");
+
+    let torrents = seriesView.torrents[n];
+    if (!torrents) {
+      status.textContent = "Looking for torrents…";
+      try {
+        const res = await fetch(
+          `/api/v1/series/${seriesView.meta.imdb}/torrents?season=${n}`
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || "Could not load torrents");
+        }
+        torrents = data;
+        if ((data.sources || []).some((s) => s.ok)) {
+          seriesView.torrents[n] = data; // don't cache a total failure
+        }
+      } catch (err) {
+        if (token === seriesView.token && seriesView.season === n) {
+          status.textContent = err.message;
+          rows.forEach((r) => r.setTorrents(null));
+        }
+        return;
+      }
+    }
+    if (token !== seriesView.token || seriesView.season !== n) {
+      return; // another season or series was opened meanwhile
+    }
+    const failed = (torrents.sources || []).filter((s) => !s.ok);
+    status.textContent = failed.length
+      ? "Some sources failed: " + failed.map((s) => s.label).join(", ")
+      : "";
+    rows.forEach((r) => r.setTorrents(torrents));
+  };
+
+  const closeSeries = () => {
+    seriesView.token++;
+    document.querySelector("#series-view").classList.add("hidden");
+  };
+
+  const openSeries = async (meta) => {
+    const token = ++seriesView.token;
+    Object.assign(seriesView, { meta, info: null, season: null, torrents: {} });
+    const view = document.querySelector("#series-view");
+    view.innerHTML = "";
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "text-sm text-primary cursor-pointer";
+    close.style.cssText = "display:block;margin-left:auto";
+    close.textContent = "Close";
+    close.addEventListener("click", closeSeries);
+
+    const head = document.createElement("div");
+    head.className = "flex gap-3";
+    const headBody = document.createElement("div");
+    headBody.className = "flex flex-col gap-2 flex-1 min-w-0";
+    const seasons = document.createElement("div");
+    seasons.className = "flex items-center gap-2";
+    seasons.style.flexWrap = "wrap";
+    const status = document.createElement("p");
+    status.id = "series-status";
+    status.className = "text-sm text-muted-foreground";
+    status.textContent = "Loading episodes…";
+    headBody.append(buildMetaHeader(meta, { episodes: false }), seasons, status);
+    head.append(buildPoster(meta, 100, 148), headBody);
+
+    const list = document.createElement("div");
+    list.id = "series-episodes";
+    list.className = "flex flex-col border rounded-lg";
+    list.style.cssText = "max-height:70vh;overflow:auto";
+
+    view.append(close, head, list);
+    view.classList.remove("hidden");
+    view.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    try {
+      const res = await fetch(`/api/v1/series/${meta.imdb}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Could not load this series");
+      }
+      if (token !== seriesView.token) {
+        return;
+      }
+      seriesView.info = data;
+    } catch (err) {
+      if (token === seriesView.token) {
+        status.textContent = err.message;
+      }
+      return;
+    }
+
+    const all = seriesView.info.seasons || [];
+    if (!all.length) {
+      status.textContent = "No episodes listed for this series";
+      return;
+    }
+    all.forEach((s) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className =
+        "series-season px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer";
+      b.dataset.season = String(s.season);
+      b.textContent = s.season === 0 ? "Specials" : `Season ${s.season}`;
+      b.addEventListener("click", () => selectSeason(s.season));
+      seasons.appendChild(b);
+    });
+    // Phase 3 will open the season of the next episode to watch
+    selectSeason((all.find((s) => s.season > 0) || all[0]).season);
   };
 
   // Featured titles (server: featured.go) and streaming catalogs (server:
@@ -1566,7 +1901,11 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       .join(" · ");
 
     tile.append(poster, name, sub);
-    tile.addEventListener("click", () => showFeaturedDetail(group));
+    tile.addEventListener("click", () =>
+      meta.type === "series" && /^tt\d+$/.test(meta.imdb || "")
+        ? openSeries(meta)
+        : showFeaturedDetail(group)
+    );
     return tile;
   };
 
