@@ -1461,12 +1461,33 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     );
   };
 
-  // Featured titles (server: featured.go): tabs + poster grid; clicking a
-  // poster opens its torrents to pick one. Lists are cached per page load.
+  // Featured titles (server: featured.go) and streaming catalogs (server:
+  // catalogs.go): tabs + poster grid; clicking a poster opens its torrents to
+  // pick one. Catalog titles come without torrents, so they are searched on
+  // open. Lists are cached per page load.
   const featuredLoaded = {};
   let featuredActive = null;
+  let streamType = "movie";
+  let featuredDetailToken = 0;
 
-  const showFeaturedDetail = (group) => {
+  const torrentsForTitle = async (meta) => {
+    const isSeries = meta.type === "series";
+    const year = (meta.year || "").slice(0, 4);
+    const q = isSeries || !year ? meta.title : `${meta.title} ${year}`;
+    const res = await fetch(
+      `/api/v1/search?q=${encodeURIComponent(q)}&category=${isSeries ? "tv" : "movies"}`,
+      { signal: AbortSignal.timeout(((settings?.searchTimeoutSeconds || 30) + 5) * 1000) }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || "Search failed");
+    }
+    const match = (data.groups || []).find((g) => g.key === meta.imdb);
+    return match ? match.results || [] : [];
+  };
+
+  const showFeaturedDetail = async (group) => {
+    const token = ++featuredDetailToken;
     const detail = document.querySelector("#featured-detail");
     detail.innerHTML = "";
 
@@ -1475,21 +1496,50 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     close.className = "text-sm text-primary cursor-pointer";
     close.style.cssText = "display:block;margin-left:auto";
     close.textContent = "Close";
-    close.addEventListener("click", () => detail.classList.add("hidden"));
+    close.addEventListener("click", () => {
+      featuredDetailToken++;
+      detail.classList.add("hidden");
+    });
 
     const row = document.createElement("div");
     row.className = "flex gap-3";
     const body = document.createElement("div");
     body.className = "flex flex-col gap-2 flex-1 min-w-0";
-    body.append(
-      buildMetaHeader(group.meta),
-      buildTorrentList(group.results || [], 6)
-    );
+    const list = document.createElement("div");
+    body.append(buildMetaHeader(group.meta), list);
     row.append(buildPoster(group.meta, 100, 148), body);
 
     detail.append(close, row);
     detail.classList.remove("hidden");
     detail.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    if (!group.results?.length && !group.searched && group.meta?.imdb) {
+      const note = document.createElement("p");
+      note.className = "text-sm text-muted-foreground";
+      note.textContent = "Searching torrents…";
+      list.append(note);
+      try {
+        group.results = await torrentsForTitle(group.meta);
+        group.searched = true;
+      } catch (err) {
+        if (token === featuredDetailToken) {
+          note.textContent = err.message;
+        }
+        return;
+      }
+      if (token !== featuredDetailToken) {
+        return; // closed, or another title was opened meanwhile
+      }
+      list.innerHTML = "";
+    }
+    if (!group.results?.length) {
+      const none = document.createElement("p");
+      none.className = "text-sm text-muted-foreground";
+      none.textContent = "No torrents found for this title";
+      list.append(none);
+      return;
+    }
+    list.append(buildTorrentList(group.results, 6));
   };
 
   const buildFeaturedTile = (group) => {
@@ -1520,40 +1570,49 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     return tile;
   };
 
-  const loadFeaturedList = async (id) => {
-    featuredActive = id;
-    document.querySelectorAll(".featured-tab").forEach((b) => {
-      const on = b.dataset.list === id;
+  const markActive = (selector, attr, value) =>
+    document.querySelectorAll(selector).forEach((b) => {
+      const on = b.dataset[attr] === value;
       b.classList.toggle("bg-primary", on);
       b.classList.toggle("text-primary-foreground", on);
       b.classList.toggle("bg-muted", !on);
     });
+
+  // id: a featured list ("popular"...) or "stream:<service>" (uses streamType)
+  const loadFeaturedList = async (id) => {
+    const isStream = id.startsWith("stream:");
+    const key = isStream ? `${id}/${streamType}` : id;
+    featuredActive = key;
+    featuredDetailToken++;
+    markActive(".featured-tab", "list", id);
+    markActive(".stream-type", "type", isStream ? streamType : "");
     document.querySelector("#featured-detail").classList.add("hidden");
     const grid = document.querySelector("#featured-grid");
     const status = document.querySelector("#featured-status");
     grid.innerHTML = "";
 
-    let groups = featuredLoaded[id];
+    let groups = featuredLoaded[key];
     if (!groups) {
       status.textContent = "Loading…";
+      const url = isStream
+        ? `/api/v1/catalog?service=${encodeURIComponent(id.slice(7))}&type=${streamType}`
+        : `/api/v1/featured?list=${encodeURIComponent(id)}`;
       try {
-        const res = await fetch(
-          `/api/v1/featured?list=${encodeURIComponent(id)}`
-        );
+        const res = await fetch(url);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           throw new Error(data.error || "Could not load this list");
         }
         groups = Array.isArray(data.groups) ? data.groups : [];
-        featuredLoaded[id] = groups;
+        featuredLoaded[key] = groups;
       } catch (err) {
-        if (featuredActive === id) {
+        if (featuredActive === key) {
           status.textContent = err.message;
         }
         return;
       }
     }
-    if (featuredActive !== id) {
+    if (featuredActive !== key) {
       return; // another tab was picked while this one loaded
     }
     status.textContent = groups.length ? "" : "Nothing to show right now";
@@ -1562,6 +1621,16 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
   document.querySelectorAll(".featured-tab").forEach((b) =>
     b.addEventListener("click", () => loadFeaturedList(b.dataset.list))
+  );
+  document.querySelectorAll(".stream-type").forEach((b) =>
+    b.addEventListener("click", () => {
+      streamType = b.dataset.type;
+      // keep the current service, or default to Netflix
+      const active = featuredActive || "";
+      loadFeaturedList(
+        active.startsWith("stream:") ? active.split("/")[0] : "stream:nfx"
+      );
+    })
   );
   loadFeaturedList("popular");
 

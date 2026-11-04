@@ -178,7 +178,7 @@
         >
         <div id="library-list" class="w-full border rounded-lg"></div>
       </div>
-      <!-- Featured titles from YTS / TPB (server: featured.go) -->
+      <!-- Featured titles from YTS / TPB (featured.go) and streaming catalogs (catalogs.go) -->
       <div id="featured-wrapper" class="w-full mt-6 flex flex-col gap-3">
         <div class="flex items-center gap-2" style="flex-wrap: wrap">
           <span class="text-muted-foreground text-sm font-semibold"
@@ -188,6 +188,21 @@
             <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="recent">Recently added</button>
             <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="top-movies">Top movies</button>
             <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="top-tv">Top TV</button>
+        </div>
+        <div class="flex items-center gap-2" style="flex-wrap: wrap">
+          <span class="text-muted-foreground text-sm font-semibold"
+            >Streaming</span
+          >
+            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="stream:nfx">Netflix</button>
+            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="stream:nfx-top">Netflix Top 10</button>
+            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="stream:hbm">HBO Max</button>
+            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="stream:dnp">Disney+</button>
+            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="stream:amp">Prime Video</button>
+            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="stream:atp">Apple TV+</button>
+          <span class="flex items-center" style="margin-left: auto; gap: 4px">
+            <button type="button" class="stream-type px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-type="movie">Movies</button>
+            <button type="button" class="stream-type px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-type="series">Series</button>
+          </span>
         </div>
         <div id="featured-detail" class="hidden border rounded-lg p-3"></div>
         <p id="featured-status" class="text-sm text-muted-foreground"></p>
