@@ -471,7 +471,7 @@ func init() {
 			EnableJackett:  false,
 			JackettHost:    "",
 			JackettApiKey:  "",
-			SubtitleLanguages: "es,en",
+			SubtitleLanguages: defaultSubtitleLanguages,
 		}
 		// Create the config directory if it doesn't exist
 		if err := os.MkdirAll("config", 0755); err != nil {

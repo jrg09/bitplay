@@ -64,8 +64,14 @@ type subtitleConfig struct {
 
 var languageCodeRe = regexp.MustCompile(`^[a-z]{2,3}(-[a-z0-9]{2,4})?$`)
 
+// defaultSubtitleLanguages is the priority order used when none is configured.
+// OpenSubtitles language codes (verified against GET /infos/languages):
+// "es" = Spanish, "ea" = Spanish (LA), "sp" = Spanish (EU). Most Latin
+// American releases are still tagged "es", so it goes first.
+const defaultSubtitleLanguages = "es,ea,sp,en"
+
 // parseLanguages turns "es, en" into ["es", "en"], keeping the order (it is
-// the priority order). Falls back to Spanish then English.
+// the priority order). Falls back to defaultSubtitleLanguages.
 func parseLanguages(raw string) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -81,7 +87,7 @@ func parseLanguages(raw string) []string {
 		}
 	}
 	if len(out) == 0 {
-		return []string{"es", "en"}
+		return strings.Split(defaultSubtitleLanguages, ",")
 	}
 	return out
 }
@@ -428,10 +434,13 @@ type osSearchResponse struct {
 	Data []osSubtitle `json:"data"`
 }
 
+// Fields verified against live GET /subtitles responses (2026-11-04).
+// moviehash_match is only present when the request includes moviehash.
 type osSubtitle struct {
 	ID         string `json:"id"`
 	Attributes struct {
 		Language          string `json:"language"`
+		NbCD              int    `json:"nb_cd"`
 		DownloadCount     int    `json:"download_count"`
 		HearingImpaired   bool   `json:"hearing_impaired"`
 		AITranslated      bool   `json:"ai_translated"`
@@ -447,7 +456,9 @@ type osSubtitle struct {
 }
 
 func osSearchOnce(cfg subtitleConfig, q url.Values) ([]osSubtitle, error) {
-	// url.Values.Encode sorts keys, which the API expects (lowercase, sorted)
+	// The API answers 301 to non-canonical URLs (unsorted keys, uppercase
+	// values). url.Values.Encode sorts keys; values are lowercased by callers.
+	// "%2C"-encoded commas and "+" for spaces are accepted as-is (verified).
 	data, status, err := osDo(cfg, http.MethodGet, osBaseURL(osDefaultHost)+"/subtitles?"+q.Encode(), nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("OpenSubtitles search failed: %w", err)
@@ -550,7 +561,7 @@ type subtitleTrack struct {
 }
 
 var languageNames = map[string]string{
-	"es": "Español", "en": "English", "pt": "Português", "pt-br": "Português (Brasil)",
+	"es": "Español", "ea": "Español (Latinoamérica)", "sp": "Español (España)", "en": "English", "pt": "Português", "pt-br": "Português (Brasil)",
 	"fr": "Français", "it": "Italiano", "de": "Deutsch", "ja": "日本語", "ko": "한국어",
 }
 
@@ -572,6 +583,10 @@ func pickBest(results []osSubtitle, langs []string, fileName string) []subtitleT
 		bestIdx, bestScore := -1, math.Inf(-1)
 		for i, sub := range results {
 			if !strings.EqualFold(sub.Attributes.Language, lang) || len(sub.Attributes.Files) == 0 {
+				continue
+			}
+			// multi-CD subtitles would only cover part of a single video file
+			if sub.Attributes.NbCD > 1 || len(sub.Attributes.Files) > 1 {
 				continue
 			}
 			if used[sub.Attributes.Files[0].FileID] {
@@ -737,6 +752,9 @@ func fetchSubtitleVTT(cfg subtitleConfig, fileID string) ([]byte, error) {
 			continue
 		}
 		break
+	}
+	if status == http.StatusNotAcceptable {
+		return nil, osAPIError("OpenSubtitles daily download quota reached", status, data)
 	}
 	if status != http.StatusOK {
 		return nil, osAPIError("OpenSubtitles download failed", status, data)

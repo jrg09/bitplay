@@ -418,6 +418,19 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         return;
       }
 
+      // Download the default track first so failures (missing credentials,
+      // daily quota reached, ...) are reported instead of a silent empty
+      // track. The server caches it, so the player's own request is free.
+      const first = data.tracks.find((t) => t.default) || data.tracks[0];
+      const probe = await fetch(first.src);
+      if (!probe.ok) {
+        const text = (await probe.text()).trim();
+        throw new Error(text || "Could not download subtitle");
+      }
+      if (player !== currentPlayer) {
+        return;
+      }
+
       const added = [];
       let defaultEl = null;
       data.tracks.forEach((t) => {
@@ -1751,7 +1764,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       document.querySelector("#osUsername").value =
         data.openSubtitlesUsername || "";
       document.querySelector("#osLanguages").value =
-        data.subtitleLanguages || "es,en";
+        data.subtitleLanguages || "es,ea,sp,en";
       const osKeyInput = document.querySelector("#osApiKey");
       osKeyInput.value = "";
       osKeyInput.placeholder = data.openSubtitlesApiKeySet

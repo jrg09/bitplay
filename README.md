@@ -13,7 +13,7 @@ BitPlay is a web application built with Go that allows you to stream video conte
 *   **Prowlarr Integration:** Connect to your Prowlarr instance to search across your configured indexers directly within BitPlay.
 *   **Jackett Integration:** Connect to your Jackett instance as an alternative search provider.
 *   **Subtitles:** Embedded SRT subtitles are converted to VTT on the fly, and you can upload your own `.srt`/`.vtt` file during playback.
-*   **Automatic Subtitle Search (OpenSubtitles):** When enabled, BitPlay looks up subtitles for the video being played (by OpenSubtitles file hash when the end of the file is available, otherwise by the parsed title / season / episode / year), in the languages you configure (default `es,en`). The best match per language is attached to the player and the first language is shown automatically; the rest stay available in the captions menu. See [Automatic subtitles](#automatic-subtitles).
+*   **Automatic Subtitle Search (OpenSubtitles):** When enabled, BitPlay looks up subtitles for the video being played (by OpenSubtitles file hash when the end of the file is available, otherwise by the parsed title / season / episode / year), in the languages you configure (default `es,ea,sp,en`). The best match per language is attached to the player and the first language is shown automatically; the rest stay available in the captions menu. See [Automatic subtitles](#automatic-subtitles).
 *   **Optional Basic Auth:** Protect a publicly reachable instance with a username and password via environment variables.
 *   **Maintenance Tools:** A settings tab with live session stats, recent server logs, and a cache purge button.
 *   **Session Management:** Handles multiple torrent sessions and cleans up inactive ones.
@@ -126,7 +126,7 @@ Open **Settings → Subtitles** and fill in:
 
 *   **API Key:** create a (free) consumer at [opensubtitles.com](https://www.opensubtitles.com/consumers).
 *   **Username / Password:** your OpenSubtitles account. The API requires a login to *download* subtitles; searching only needs the API key. The login token is cached in memory for 23 hours.
-*   **Languages:** comma-separated codes in priority order, e.g. `es,en`. The first language that has a result is displayed by default.
+*   **Languages:** comma-separated codes in priority order, e.g. `es,ea,sp,en`. OpenSubtitles uses `es` (Spanish), `ea` (Spanish, Latin America) and `sp` (Spanish, Spain); most Latin American releases are tagged `es`. The first language that has a result is displayed by default.
 
 Use **Test Connection** to validate the credentials. Notes:
 
