@@ -939,7 +939,52 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
   let searchData = [];
   let searchPage = 1;
-  let searchPageSize = 5;
+  let searchPageSize = 10;
+  // null key = server order (seeders, then date)
+  let searchSort = { key: null, dir: -1 };
+
+  const updateSortIndicators = () => {
+    document.querySelectorAll("#search-result th[data-sort]").forEach((th) => {
+      const base = th.dataset.label || th.textContent.trim();
+      th.dataset.label = base;
+      const arrow =
+        searchSort.key === th.dataset.sort
+          ? searchSort.dir > 0
+            ? " ▴"
+            : " ▾"
+          : "";
+      th.textContent = base + arrow;
+    });
+  };
+
+  document.querySelectorAll("#search-result th[data-sort]").forEach((th) => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      // first click: descending, second: ascending
+      searchSort =
+        searchSort.key === key
+          ? { key, dir: -searchSort.dir }
+          : { key, dir: -1 };
+      searchData = [...searchData].sort(
+        (a, b) => ((a[key] || 0) - (b[key] || 0)) * searchSort.dir
+      );
+      searchPage = 1;
+      updateSortIndicators();
+      updateSearchResults();
+    });
+  });
+
+  // the search box is shown when any search backend is enabled
+  const updateSearchVisibility = () => {
+    const publicSearch =
+      !settings?.disablePublicSearch &&
+      (settings?.disabledSearchSources || []).length < 3;
+    if (publicSearch || settings?.enableProwlarr || settings?.enableJackett) {
+      searchWrapper.classList.remove("hidden");
+    } else {
+      searchWrapper.classList.add("hidden");
+    }
+  };
 
   const updateSearchResults = () => {
     const searchPagination = document.querySelector("#search-pagination");
@@ -1029,19 +1074,14 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     searchResults.classList.add("hidden");
     document.querySelector("#search-pagination").classList.add("hidden");
 
-    let apiUrl = "/api/v1/prowlarr/search";
-
-    if (!settings?.enableProwlarr && settings?.enableJackett) {
-      apiUrl = "/api/v1/jackett/search";
-    }
-
+    // public sources + Prowlarr/Jackett, merged server side
+    const category = document.querySelector("#search-category").value;
     const timeoutMs = ((settings?.searchTimeoutSeconds || 30) + 5) * 1000;
 
-    fetch(`${apiUrl}?q=${encodeURIComponent(query)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(timeoutMs),
-    })
+    fetch(
+      `/api/v1/search?q=${encodeURIComponent(query)}&category=${encodeURIComponent(category)}`,
+      { signal: AbortSignal.timeout(timeoutMs) }
+    )
       .then(async (res) => {
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -1050,10 +1090,22 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         return res.json();
       })
       .then((data) => {
-        if (data && typeof data === "object") {
-          searchData = data;
-        } else {
-          searchData = [];
+        searchData = Array.isArray(data?.results) ? data.results : [];
+        searchSort = { key: null, dir: -1 };
+        updateSortIndicators();
+
+        const failed = (data?.sources || []).filter((s) => !s.ok);
+        if (failed.length) {
+          const allFailed = failed.length === data.sources.length;
+          butterup.toast({
+            message:
+              (allFailed ? "Search failed: " : "Some sources failed: ") +
+              failed.map((s) => `${s.label} (${s.error})`).join(", "),
+            location: "top-right",
+            icon: true,
+            dismissable: true,
+            type: allFailed ? "error" : "warning",
+          });
         }
 
         updateSearchResults();
@@ -1394,12 +1446,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
           body.searchTimeoutSeconds || "";
         document.querySelector("#jackettSkipTls").checked = body.skipTlsVerify;
 
-        // Check if Prowlarr or Jackett is enabled
-        if (body?.enableProwlarr || settings?.enableJackett) {
-          searchWrapper.classList.remove("hidden");
-        } else {
-          searchWrapper.classList.add("hidden");
-        }
+        updateSearchVisibility();
       }
 
       submitButton.removeAttribute("disabled");
@@ -1481,18 +1528,60 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         body.searchTimeoutSeconds || "";
       document.querySelector("#prowlarrSkipTls").checked = body.skipTlsVerify;
 
-      // Check if Prowlarr or Jackett is enabled
-      if (body?.enableJackett || settings?.enableProwlarr) {
-        searchWrapper.classList.remove("hidden");
-      } else {
-        searchWrapper.classList.add("hidden");
-      }
+      updateSearchVisibility();
     }
 
     submitButton.removeAttribute("disabled");
     submitButton.classList.remove("loader");
     submitButton.innerHTML = "Save Settings";
   });
+
+  document
+    .querySelector("#search-settings-form")
+    .addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const body = {
+        enablePublicSearch: e.target.querySelector("#enablePublicSearch")
+          .checked,
+        sources: [...e.target.querySelectorAll(".search-source:checked")].map(
+          (el) => el.value
+        ),
+      };
+      try {
+        const response = await fetch("/api/v1/settings/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to save search settings");
+        }
+        settings = {
+          ...settings,
+          disablePublicSearch: !body.enablePublicSearch,
+          disabledSearchSources: ["yts", "tpb", "eztv"].filter(
+            (id) => !body.sources.includes(id)
+          ),
+        };
+        updateSearchVisibility();
+        butterup.toast({
+          message: "Search settings saved successfully",
+          location: "top-right",
+          icon: true,
+          dismissable: true,
+          type: "success",
+        });
+      } catch (err) {
+        butterup.toast({
+          message: err.message,
+          location: "top-right",
+          icon: true,
+          dismissable: true,
+          type: "error",
+        });
+      }
+    });
 
   const subtitleFormBody = (form) => ({
     enableSubtitles: form.querySelector("#enableSubtitles").checked,
@@ -1750,6 +1839,11 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     })
     .then((data) => {
       settings = data;
+      document.querySelector("#enablePublicSearch").checked =
+        !data.disablePublicSearch;
+      document.querySelectorAll(".search-source").forEach((el) => {
+        el.checked = !(data.disabledSearchSources || []).includes(el.value);
+      });
       document.querySelector("#enableProxy").checked = data.enableProxy;
       document.querySelector("#proxyUrl").value = data.proxyUrl || "";
       document.querySelector("#enableProwlarr").checked =
@@ -1810,12 +1904,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         }
       });
 
-      // Check if Prowlarr or Jackett is enabled
-      if (data?.enableProwlarr || data?.enableJackett) {
-        searchWrapper.classList.remove("hidden");
-      } else {
-        searchWrapper.classList.add("hidden");
-      }
+      updateSearchVisibility();
     })
     .catch((error) => {
       console.error("There was a problem with the fetch operation:", error);

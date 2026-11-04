@@ -13,6 +13,7 @@ BitPlay is a web application built with Go that allows you to stream video conte
 *   **Prowlarr Integration:** Connect to your Prowlarr instance to search across your configured indexers directly within BitPlay.
 *   **Jackett Integration:** Connect to your Jackett instance as an alternative search provider.
 *   **Subtitles:** Embedded SRT subtitles are converted to VTT on the fly, and you can upload your own `.srt`/`.vtt` file during playback.
+*   **Built-in Torrent Search:** Search YTS, The Pirate Bay and EZTV directly from the page, no indexer needed. Results are merged with Prowlarr / Jackett (when enabled), de-duplicated by info hash and sorted by seeders. See [Torrent search](#torrent-search).
 *   **Automatic Subtitle Search (OpenSubtitles):** When enabled, BitPlay looks up subtitles for the video being played (by OpenSubtitles file hash when the end of the file is available, otherwise by the parsed title / season / episode / year), in the languages you configure (default `es,ea,sp,en`). The best match per language is attached to the player and the first language is shown automatically; the rest stay available in the captions menu. See [Automatic subtitles](#automatic-subtitles).
 *   **Optional Basic Auth:** Protect a publicly reachable instance with a username and password via environment variables.
 *   **Maintenance Tools:** A settings tab with live session stats, recent server logs, and a cache purge button.
@@ -119,6 +120,17 @@ BitPlay is configured primarily through its web interface after starting the app
     *   **Maintenance:** The fourth settings tab shows active torrent sessions, recent server logs, and a Purge Cache button that stops all sessions and deletes everything downloaded to disk.
 
 Settings are saved automatically to `/app/config/settings.json` inside the Docker container, which maps to `./config/settings.json` on the host via the mounted volume in the example Docker Compose setup above. API keys are never sent back to the browser once saved.
+
+### Torrent search
+
+The search box on the home page queries public sources in parallel, inspired by [torlink](https://github.com/baairon/torlink):
+
+*   **YTS** (movies), **The Pirate Bay** via apibay (movies and TV, video categories only) and **EZTV** (TV). EZTV has no text search, so BitPlay indexes its most recent torrents and then fetches whole shows by IMDb id (also taken from TV results on The Pirate Bay).
+*   If Prowlarr and/or Jackett are enabled, their results are merged into the same table.
+*   Pick a category (All / Movies / TV) next to the search box and click the *Size* or *Seeders* headers to sort.
+*   Settings → **Search** turns the public sources on or off, globally or one by one. They are on by default. Requests go through the SOCKS5 proxy when it is enabled.
+
+Each source has its own deadline (15 s), so a slow site only drops its own results; sources that fail are listed in a warning.
 
 ### Automatic subtitles
 

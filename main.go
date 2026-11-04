@@ -84,6 +84,10 @@ type Settings struct {
 	OpenSubtitlesUsername string `json:"openSubtitlesUsername"`
 	OpenSubtitlesPassword string `json:"openSubtitlesPassword"`
 	SubtitleLanguages     string `json:"subtitleLanguages"`
+	// Built-in public torrent search (on unless disabled, so existing
+	// settings.json files get it without changes)
+	DisablePublicSearch   bool     `json:"disablePublicSearch"`
+	DisabledSearchSources []string `json:"disabledSearchSources"`
 }
 
 func searchTimeout() time.Duration {
@@ -556,6 +560,8 @@ func main() {
 	http.HandleFunc("/api/v1/subtitles/auto", subtitlesAutoHandler)
 	http.HandleFunc("/api/v1/subtitles/file/", subtitleFileHandler)
 	http.HandleFunc("/api/v1/subtitles/test", testSubtitleConnectionHandler)
+	http.HandleFunc("/api/v1/search", torrentSearchHandler)
+	http.HandleFunc("/api/v1/settings/search", savePublicSearchSettingsHandler)
 	http.HandleFunc("/api/v1/prowlarr/search", searchFromProwlarr)
 	http.HandleFunc("/api/v1/jackett/search", searchFromJackett)
 	http.HandleFunc("/api/v1/prowlarr/test", testProwlarrConnection)

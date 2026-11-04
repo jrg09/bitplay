@@ -89,6 +89,15 @@
             name="search"
             type="search"
           />
+          <select
+            id="search-category"
+            aria-label="Category"
+            class="dark:bg-input/30 border-input flex min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs outline-none md:text-sm h-12"
+          >
+            <option value="all">All</option>
+            <option value="movies">Movies</option>
+            <option value="tv">TV</option>
+          </select>
           <button class="btn" type="submit">Search</button>
         </form>
         <div
@@ -100,8 +109,20 @@
               <tr class="bg-muted text-muted-foreground border-b">
                 <th class="p-3 text-left">Name</th>
                 <th class="p-3 text-left">Indexer</th>
-                <th class="p-3 text-left">Size</th>
-                <th class="p-3 text-left">Seeders</th>
+                <th
+                  class="p-3 text-left cursor-pointer"
+                  data-sort="sizeBytes"
+                  title="Sort by size"
+                >
+                  Size
+                </th>
+                <th
+                  class="p-3 text-left cursor-pointer"
+                  data-sort="seeders"
+                  title="Sort by seeders"
+                >
+                  Seeders
+                </th>
                 <th class="p-3 text-left w-[10px]"></th>
               </tr>
             </thead>
@@ -355,6 +376,28 @@
               <path d="M7 15h4M15 15h2M7 11h2M13 11h4"></path>
             </svg>
             <span>Subtitles</span>
+          </button>
+          <button
+            class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg transition-colors bg-muted border"
+            data-index="5"
+            type="button"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="lucide lucide-search w-4 h-4"
+            >
+              <circle cx="11" cy="11" r="8"></circle>
+              <path d="m21 21-4.3-4.3"></path>
+            </svg>
+            <span>Search</span>
           </button>
           <button
             class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg transition-colors bg-muted border"
@@ -747,6 +790,55 @@
             >
               <span>Test Connection</span>
             </button>
+            <button type="submit" class="btn flex-1 !h-11">
+              Save Settings
+            </button>
+          </div>
+        </form>
+        <form
+          id="search-settings-form"
+          data-tab="5"
+          class="tab flex flex-col gap-6 hidden"
+        >
+          <label
+            for="enablePublicSearch"
+            class="switchInput flex items-center cursor-pointer"
+          >
+            <input id="enablePublicSearch" type="checkbox" class="sr-only" />
+            <div
+              class="w-11 switch-wrapper h-6 border bg-accent rounded-full shadow-inner relative transition"
+            >
+              <div
+                class="dot absolute size-5 bg-white rounded-full shadow left-[1px] top-[1px] transition"
+              ></div>
+            </div>
+            <span class="ml-3 text-muted-foreground">
+              Search public torrent sources
+            </span>
+          </label>
+          <div class="flex flex-col gap-2">
+            <span class="text-muted-foreground text-sm font-semibold"
+              >Sources</span
+            >
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" class="search-source" value="yts" />
+              YTS <span class="text-muted-foreground">(movies)</span>
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" class="search-source" value="tpb" />
+              The Pirate Bay
+              <span class="text-muted-foreground">(movies, TV)</span>
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" class="search-source" value="eztv" />
+              EZTV <span class="text-muted-foreground">(TV)</span>
+            </label>
+            <p class="text-muted-foreground text-xs">
+              Results are merged with Prowlarr and Jackett when they are
+              enabled. Requests go through the proxy when it is enabled.
+            </p>
+          </div>
+          <div class="flex gap-2">
             <button type="submit" class="btn flex-1 !h-11">
               Save Settings
             </button>
