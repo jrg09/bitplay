@@ -336,6 +336,28 @@
           </button>
           <button
             class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg transition-colors bg-muted border"
+            data-index="4"
+            type="button"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="lucide lucide-captions w-4 h-4"
+            >
+              <rect width="18" height="14" x="3" y="5" rx="2" ry="2"></rect>
+              <path d="M7 15h4M15 15h2M7 11h2M13 11h4"></path>
+            </svg>
+            <span>Subtitles</span>
+          </button>
+          <button
+            class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg transition-colors bg-muted border"
             data-index="3"
             type="button"
           >
@@ -634,6 +656,95 @@
                 <path d="m16 2 6 6"></path>
                 <path d="M12 16H4"></path>
               </svg>
+              <span>Test Connection</span>
+            </button>
+            <button type="submit" class="btn flex-1 !h-11">
+              Save Settings
+            </button>
+          </div>
+        </form>
+        <form
+          id="subtitle-settings-form"
+          data-tab="4"
+          class="tab flex flex-col gap-6 hidden"
+        >
+          <label
+            for="enableSubtitles"
+            class="switchInput flex items-center cursor-pointer"
+          >
+            <input id="enableSubtitles" type="checkbox" class="sr-only" />
+            <div
+              class="w-11 switch-wrapper h-6 border bg-accent rounded-full shadow-inner relative transition"
+            >
+              <div
+                class="dot absolute size-5 bg-white rounded-full shadow left-[1px] top-[1px] transition"
+              ></div>
+            </div>
+            <span class="ml-3 text-muted-foreground">
+              Automatically search subtitles (OpenSubtitles)
+            </span>
+          </label>
+          <div class="flex flex-col gap-2">
+            <label
+              for="osApiKey"
+              class="text-muted-foreground text-sm font-semibold"
+              >OpenSubtitles API Key</label
+            >
+            <input
+              type="password"
+              id="osApiKey"
+              autocomplete="off"
+              placeholder="Your OpenSubtitles API key"
+              class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive h-10 pr-12 overflow-ellipsis overflow-hidden"
+            />
+          </div>
+          <div class="flex flex-col gap-2">
+            <label
+              for="osUsername"
+              class="text-muted-foreground text-sm font-semibold"
+              >Username</label
+            >
+            <input
+              type="text"
+              id="osUsername"
+              autocomplete="off"
+              placeholder="OpenSubtitles username"
+              class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive h-10 pr-12 overflow-ellipsis overflow-hidden"
+            />
+          </div>
+          <div class="flex flex-col gap-2">
+            <label
+              for="osPassword"
+              class="text-muted-foreground text-sm font-semibold"
+              >Password</label
+            >
+            <input
+              type="password"
+              id="osPassword"
+              autocomplete="new-password"
+              placeholder="OpenSubtitles password"
+              class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive h-10 pr-12 overflow-ellipsis overflow-hidden"
+            />
+          </div>
+          <div class="flex flex-col gap-2">
+            <label
+              for="osLanguages"
+              class="text-muted-foreground text-sm font-semibold"
+              >Languages (priority order, comma separated)</label
+            >
+            <input
+              type="text"
+              id="osLanguages"
+              placeholder="es,en"
+              class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive h-10 pr-12 overflow-ellipsis overflow-hidden"
+            />
+          </div>
+          <div class="flex gap-2">
+            <button
+              type="button"
+              id="test-subtitles"
+              class="flex items-center justify-center gap-2 px-4 py-2 flex-1 rounded-lg transition-colors bg-muted border font-medium text-sm"
+            >
               <span>Test Connection</span>
             </button>
             <button type="submit" class="btn flex-1 !h-11">

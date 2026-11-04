@@ -364,6 +364,108 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     }
   };
 
+  // Automatic subtitles (OpenSubtitles). Tracks are added as remote text
+  // tracks; the server only downloads a subtitle when its track is loaded.
+  let autoSubtitleState = { player: null, tracks: [] };
+
+  const clearAutoSubtitles = () => {
+    if (player && autoSubtitleState.player === player) {
+      autoSubtitleState.tracks.forEach((el) => {
+        try {
+          player.removeRemoteTextTrack(el);
+        } catch (err) {
+          console.warn("Could not remove subtitle track:", err);
+        }
+      });
+    }
+    autoSubtitleState = { player: null, tracks: [] };
+  };
+
+  const autoLoadSubtitles = async (sessionId, file) => {
+    if (!settings?.enableSubtitles || !settings?.openSubtitlesApiKeySet) {
+      return;
+    }
+    const currentPlayer = player;
+    if (!currentPlayer) {
+      return;
+    }
+    clearAutoSubtitles();
+
+    try {
+      const res = await fetch(
+        "/api/v1/subtitles/auto?session=" +
+          encodeURIComponent(sessionId) +
+          "&file=" +
+          file.index
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Subtitle search failed");
+      }
+      // the user may have started another video while we were searching
+      if (player !== currentPlayer) {
+        return;
+      }
+
+      if (!data.tracks || !data.tracks.length) {
+        butterup.toast({
+          message: "No subtitles found for this video",
+          location: "top-right",
+          icon: true,
+          dismissable: true,
+          type: "info",
+        });
+        return;
+      }
+
+      const added = [];
+      let defaultEl = null;
+      data.tracks.forEach((t) => {
+        const el = currentPlayer.addRemoteTextTrack(
+          {
+            kind: "subtitles",
+            src: t.src,
+            srclang: t.lang,
+            label: t.label + " (OpenSubtitles)",
+          },
+          false
+        );
+        added.push(el);
+        if (t.default) {
+          defaultEl = el;
+        }
+      });
+      autoSubtitleState = { player: currentPlayer, tracks: added };
+
+      // show the best match, keep the rest available in the captions menu
+      const tracks = currentPlayer.textTracks();
+      for (let i = 0; i < tracks.length; i++) {
+        if (!added.some((el) => el.track === tracks[i])) {
+          continue;
+        }
+        tracks[i].mode =
+          defaultEl && tracks[i] === defaultEl.track ? "showing" : "disabled";
+      }
+
+      butterup.toast({
+        message: `Subtitles loaded: ${data.tracks[0].label}`,
+        location: "top-right",
+        icon: true,
+        dismissable: true,
+        type: "success",
+      });
+    } catch (err) {
+      console.error("Automatic subtitles failed:", err);
+      butterup.toast({
+        message: err.message || "Could not fetch subtitles",
+        location: "top-right",
+        icon: true,
+        dismissable: true,
+        type: "error",
+      });
+    }
+  };
+
   // Never dispatch synthetic submit events at this form: they're
   // non-cancelable, so Firefox runs a real submission and reloads the page
   async function startPlayback() {
@@ -575,6 +677,8 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     );
     player.doubleTapFF();
     setupChosenPlayback(chosen);
+    // fire and forget: playback must not wait for the subtitle search
+    autoLoadSubtitles(sessionId, videoFiles[0]);
 
     document.querySelector("#video-player").style.display = "block";
 
@@ -615,6 +719,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
           }
           player.src({ src: next.src, type: next.type });
           setupChosenPlayback(next);
+          autoLoadSubtitles(sessionId, file);
           player.play();
         });
         document.querySelector("#video-player").appendChild(videoSelect);
@@ -1376,6 +1481,120 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     submitButton.innerHTML = "Save Settings";
   });
 
+  const subtitleFormBody = (form) => ({
+    enableSubtitles: form.querySelector("#enableSubtitles").checked,
+    openSubtitlesApiKey: form.querySelector("#osApiKey").value.trim(),
+    openSubtitlesUsername: form.querySelector("#osUsername").value.trim(),
+    openSubtitlesPassword: form.querySelector("#osPassword").value,
+    subtitleLanguages: form.querySelector("#osLanguages").value.trim(),
+  });
+
+  document
+    .querySelector("#test-subtitles")
+    .addEventListener("click", async (e) => {
+      const button = e.currentTarget;
+      const form = document.querySelector("#subtitle-settings-form");
+      button.setAttribute("disabled", "disabled");
+      try {
+        const response = await fetch("/api/v1/subtitles/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(subtitleFormBody(form)),
+        });
+        const data = await response.json();
+        butterup.toast({
+          message: response.ok
+            ? data.message
+            : data.error || "Connection test failed",
+          location: "top-right",
+          icon: true,
+          dismissable: true,
+          type: response.ok ? "success" : "error",
+        });
+      } catch (err) {
+        butterup.toast({
+          message: "Connection test failed: " + err.message,
+          location: "top-right",
+          icon: true,
+          dismissable: true,
+          type: "error",
+        });
+      }
+      button.removeAttribute("disabled");
+    });
+
+  document
+    .querySelector("#subtitle-settings-form")
+    .addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const submitButton = e.target.querySelector("button[type=submit]");
+      submitButton.setAttribute("disabled", "disabled");
+      submitButton.classList.add("loader");
+      submitButton.innerHTML = "Saving...";
+
+      const body = subtitleFormBody(e.target);
+      try {
+        const response = await fetch("/api/v1/settings/subtitles", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          butterup.toast({
+            message: data.error || "Failed to save settings",
+            location: "top-right",
+            icon: true,
+            dismissable: true,
+            type: "error",
+          });
+        } else {
+          butterup.toast({
+            message: "Subtitle settings saved successfully",
+            location: "top-right",
+            icon: true,
+            dismissable: true,
+            type: "success",
+          });
+
+          settings = {
+            ...settings,
+            enableSubtitles: body.enableSubtitles,
+            openSubtitlesUsername: body.openSubtitlesUsername,
+            subtitleLanguages: body.subtitleLanguages,
+            openSubtitlesApiKeySet:
+              !!body.openSubtitlesApiKey || settings?.openSubtitlesApiKeySet,
+            openSubtitlesPasswordSet:
+              !!body.openSubtitlesPassword ||
+              settings?.openSubtitlesPasswordSet,
+          };
+
+          const keyInput = document.querySelector("#osApiKey");
+          keyInput.value = "";
+          if (settings.openSubtitlesApiKeySet) {
+            keyInput.placeholder = "Saved (leave blank to keep)";
+          }
+          const passwordInput = document.querySelector("#osPassword");
+          passwordInput.value = "";
+          if (settings.openSubtitlesPasswordSet) {
+            passwordInput.placeholder = "Saved (leave blank to keep)";
+          }
+        }
+      } catch (err) {
+        butterup.toast({
+          message: "Failed to save settings: " + err.message,
+          location: "top-right",
+          icon: true,
+          dismissable: true,
+          type: "error",
+        });
+      }
+
+      submitButton.removeAttribute("disabled");
+      submitButton.classList.remove("loader");
+      submitButton.innerHTML = "Save Settings";
+    });
+
   const playTorrentFile = (file) => {
     const formData = new FormData();
     formData.append("torrent", file);
@@ -1526,6 +1745,23 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       document.querySelector("#enableJackett").checked =
         data.enableJackett || false;
       document.querySelector("#jackettHost").value = data.jackettHost || "";
+
+      document.querySelector("#enableSubtitles").checked =
+        data.enableSubtitles || false;
+      document.querySelector("#osUsername").value =
+        data.openSubtitlesUsername || "";
+      document.querySelector("#osLanguages").value =
+        data.subtitleLanguages || "es,en";
+      const osKeyInput = document.querySelector("#osApiKey");
+      osKeyInput.value = "";
+      osKeyInput.placeholder = data.openSubtitlesApiKeySet
+        ? "Saved (leave blank to keep)"
+        : "Your OpenSubtitles API key";
+      const osPasswordInput = document.querySelector("#osPassword");
+      osPasswordInput.value = "";
+      osPasswordInput.placeholder = data.openSubtitlesPasswordSet
+        ? "Saved (leave blank to keep)"
+        : "OpenSubtitles password";
 
       // a blank key field means keep the saved one
       const prowlarrKeyInput = document.querySelector("#prowlarrApiKey");

@@ -78,6 +78,12 @@ type Settings struct {
 	JackettApiKey  string `json:"jackettApiKey"`
 	SearchTimeoutSeconds int  `json:"searchTimeoutSeconds"`
 	SkipTLSVerify        bool `json:"skipTlsVerify"`
+	// Automatic subtitle search (OpenSubtitles)
+	EnableSubtitles       bool   `json:"enableSubtitles"`
+	OpenSubtitlesApiKey   string `json:"openSubtitlesApiKey"`
+	OpenSubtitlesUsername string `json:"openSubtitlesUsername"`
+	OpenSubtitlesPassword string `json:"openSubtitlesPassword"`
+	SubtitleLanguages     string `json:"subtitleLanguages"`
 }
 
 func searchTimeout() time.Duration {
@@ -465,6 +471,7 @@ func init() {
 			EnableJackett:  false,
 			JackettHost:    "",
 			JackettApiKey:  "",
+			SubtitleLanguages: "es,en",
 		}
 		// Create the config directory if it doesn't exist
 		if err := os.MkdirAll("config", 0755); err != nil {
@@ -522,11 +529,21 @@ func main() {
 
 			resp := struct {
 				Settings
-				ProwlarrApiKeySet bool `json:"prowlarrApiKeySet"`
-				JackettApiKeySet  bool `json:"jackettApiKeySet"`
-			}{snapshot, snapshot.ProwlarrApiKey != "", snapshot.JackettApiKey != ""}
+				ProwlarrApiKeySet        bool `json:"prowlarrApiKeySet"`
+				JackettApiKeySet         bool `json:"jackettApiKeySet"`
+				OpenSubtitlesApiKeySet   bool `json:"openSubtitlesApiKeySet"`
+				OpenSubtitlesPasswordSet bool `json:"openSubtitlesPasswordSet"`
+			}{
+				Settings:                 snapshot,
+				ProwlarrApiKeySet:        snapshot.ProwlarrApiKey != "",
+				JackettApiKeySet:         snapshot.JackettApiKey != "",
+				OpenSubtitlesApiKeySet:   snapshot.OpenSubtitlesApiKey != "",
+				OpenSubtitlesPasswordSet: snapshot.OpenSubtitlesPassword != "",
+			}
 			resp.ProwlarrApiKey = ""
 			resp.JackettApiKey = ""
+			resp.OpenSubtitlesApiKey = ""
+			resp.OpenSubtitlesPassword = ""
 			respondWithJSON(w, http.StatusOK, resp)
 		} else {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -535,6 +552,10 @@ func main() {
 	http.HandleFunc("/api/v1/settings/proxy", saveProxySettingsHandler)
 	http.HandleFunc("/api/v1/settings/prowlarr", saveProwlarrSettingsHandler)
 	http.HandleFunc("/api/v1/settings/jackett", saveJackettSettingsHandler)
+	http.HandleFunc("/api/v1/settings/subtitles", saveSubtitleSettingsHandler)
+	http.HandleFunc("/api/v1/subtitles/auto", subtitlesAutoHandler)
+	http.HandleFunc("/api/v1/subtitles/file/", subtitleFileHandler)
+	http.HandleFunc("/api/v1/subtitles/test", testSubtitleConnectionHandler)
 	http.HandleFunc("/api/v1/prowlarr/search", searchFromProwlarr)
 	http.HandleFunc("/api/v1/jackett/search", searchFromJackett)
 	http.HandleFunc("/api/v1/prowlarr/test", testProwlarrConnection)
