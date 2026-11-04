@@ -88,6 +88,8 @@ type Settings struct {
 	// settings.json files get it without changes)
 	DisablePublicSearch   bool     `json:"disablePublicSearch"`
 	DisabledSearchSources []string `json:"disabledSearchSources"`
+	// Days a watched file stays on disk (0 = default, see library.go)
+	KeepWatchedDays int `json:"keepWatchedDays"`
 }
 
 func searchTimeout() time.Duration {
@@ -560,6 +562,11 @@ func main() {
 	http.HandleFunc("/api/v1/subtitles/auto", subtitlesAutoHandler)
 	http.HandleFunc("/api/v1/subtitles/file/", subtitleFileHandler)
 	http.HandleFunc("/api/v1/subtitles/test", testSubtitleConnectionHandler)
+	http.HandleFunc("/api/v1/library", libraryListHandler)
+	http.HandleFunc("/api/v1/library/entry", libraryEntryHandler)
+	http.HandleFunc("/api/v1/library/progress", libraryProgressHandler)
+	http.HandleFunc("/api/v1/library/delete", libraryDeleteHandler)
+	http.HandleFunc("/api/v1/settings/library", saveLibrarySettingsHandler)
 	http.HandleFunc("/api/v1/search", torrentSearchHandler)
 	http.HandleFunc("/api/v1/settings/search", savePublicSearchSettingsHandler)
 	http.HandleFunc("/api/v1/prowlarr/search", searchFromProwlarr)
@@ -587,6 +594,7 @@ func main() {
 	})
 
 	go cleanupSessions()
+	go libraryJanitor()
 
 	addr := fmt.Sprintf(":%d", serverPort)
 	log.Printf("Attempting to start server on %s", addr)
@@ -761,7 +769,8 @@ func addTorrentHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	t, err := client.AddMagnet(magnet)
+	// saved metainfo (library.go) avoids waiting for peers to send metadata
+	t, err := libraryAddMagnet(client, magnet)
 	if err != nil {
 		respondWithJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid magnet url"})
 		return
@@ -788,6 +797,7 @@ func addTorrentHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Log successful storage
 	log.Printf("Successfully stored session: %s", sessionID)
+	libraryTorrentReady(t, magnet)
 
 	// Set client to nil so it doesn't get closed by the defer function
 	// since it's now stored in the sessions map
@@ -1021,6 +1031,11 @@ func cleanupSessions() {
 			// never reap a session with an open stream response
 			if atomic.LoadInt32(&session.ActiveStreams) > 0 {
 				session.LastUsed = time.Now()
+				return true
+			}
+
+			// let a background full download (library.go) finish
+			if libraryKeepsSessionAlive(key.(string), session) {
 				return true
 			}
 

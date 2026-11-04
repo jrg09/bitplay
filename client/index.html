@@ -212,6 +212,12 @@
         </svg>
         Try Demo with Sintel (CC Movie)
       </div>
+      <div id="library-wrapper" class="hidden w-full mt-6 flex flex-col gap-3">
+        <span class="text-muted-foreground text-sm font-semibold"
+          >Continue watching</span
+        >
+        <div id="library-list" class="w-full border rounded-lg"></div>
+      </div>
       <div
         id="torrent_file_wrapper"
         class="w-full relative rounded-lg p-3 py-10 text-center flex flex-col items-center gap-4 justify-center text-sm font-semibold text-accent-foreground mt-7 border-2 border-foreground/30 border-dashed bg-secondary/50 cursor-pointer hover:bg-transparent transition-all"
@@ -884,6 +890,35 @@
             >
 No logs yet</pre
             >
+          </div>
+          <div class="flex flex-col gap-2">
+            <label
+              for="keepWatchedDays"
+              class="text-muted-foreground text-sm font-semibold"
+              >Delete watched videos after (days)</label
+            >
+            <p class="text-sm text-muted-foreground">
+              Videos keep downloading in the background while you watch and
+              stay on disk so you can resume later. Once watched to the end
+              they are deleted after this many days.
+            </p>
+            <div class="flex gap-2">
+              <input
+                type="number"
+                min="1"
+                max="365"
+                id="keepWatchedDays"
+                placeholder="3"
+                class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive h-10 pr-12 overflow-ellipsis overflow-hidden"
+              />
+              <button
+                type="button"
+                id="save-library-settings"
+                class="btn !h-11"
+              >
+                Save
+              </button>
+            </div>
           </div>
           <div class="flex flex-col gap-2">
             <span class="text-muted-foreground text-sm font-semibold"

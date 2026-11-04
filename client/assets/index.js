@@ -481,7 +481,322 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
   // Never dispatch synthetic submit events at this form: they're
   // non-cancelable, so Firefox runs a real submission and reloads the page
-  async function startPlayback() {
+  // "Continue watching" (server side: library.go). While a video plays we
+  // report the position every few seconds; the first report also makes the
+  // server download the whole file in the background. On the next visit the
+  // saved position is restored and the video is listed on the home page.
+  const PROGRESS_INTERVAL_MS = 10000;
+  const RESUME_MIN_SECONDS = 30;
+  let playbackTracker = null;
+
+  const formatClock = (seconds) => {
+    const s = Math.max(0, Math.floor(seconds || 0));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = String(s % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+  };
+
+  const downloadStatusEl = () => {
+    let el = document.querySelector("#download-status");
+    if (!el) {
+      el = document.createElement("p");
+      el.id = "download-status";
+      el.className = "w-full text-sm text-muted-foreground mt-4";
+    }
+    // the player is re-created per playback, keep this right under it
+    document.querySelector("main").appendChild(el);
+    return el;
+  };
+
+  const stopTracking = () => {
+    if (playbackTracker) {
+      playbackTracker.stop();
+      playbackTracker = null;
+    }
+  };
+
+  const trackPlayback = async (sessionId, file) => {
+    stopTracking();
+    const currentPlayer = player;
+    if (!currentPlayer) {
+      return;
+    }
+    const statusEl = downloadStatusEl();
+    statusEl.textContent = "";
+    let stopped = false;
+    // until the saved position has been restored, report -1 so the server
+    // keeps it instead of overwriting it with 0
+    let resumed = false;
+    let sawIncomplete = false;
+    let listRefreshed = false;
+
+    const send = () => {
+      if (stopped || player !== currentPlayer) {
+        return;
+      }
+      let position = -1;
+      let duration = 0;
+      try {
+        if (resumed) {
+          position = currentPlayer.currentTime() || 0;
+        }
+        const d = currentPlayer.duration();
+        duration = Number.isFinite(d) ? d : 0;
+      } catch (err) {
+        return; // player disposed
+      }
+      fetch("/api/v1/library/progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session: sessionId,
+          file: file.index,
+          position,
+          duration,
+        }),
+        keepalive: true, // still delivered when the page is closing
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!d || stopped) {
+            return;
+          }
+          const pct = d.size ? Math.floor((d.downloaded / d.size) * 100) : 0;
+          statusEl.textContent = d.complete
+            ? "Fully downloaded: you can close this page and resume later, even without peers."
+            : `Downloading the whole video in the background: ${pct}%. You can close this page and resume later.`;
+          if (!d.complete) {
+            sawIncomplete = true;
+          } else if (sawIncomplete) {
+            sawIncomplete = false;
+            butterup.toast({
+              message: "Video fully downloaded",
+              location: "top-right",
+              icon: true,
+              dismissable: true,
+              type: "success",
+            });
+          }
+          if (!listRefreshed) {
+            listRefreshed = true;
+            renderLibrary();
+          }
+        })
+        .catch(() => {});
+    };
+
+    const timer = setInterval(() => {
+      try {
+        if (!currentPlayer.paused()) {
+          send();
+        }
+      } catch (err) {
+        // player disposed
+      }
+    }, PROGRESS_INTERVAL_MS);
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") {
+        send();
+      }
+    };
+    document.addEventListener("visibilitychange", onHidden);
+    window.addEventListener("pagehide", send);
+    currentPlayer.on("pause", send);
+    currentPlayer.on("ended", send);
+    currentPlayer.one("playing", send); // starts the background download
+
+    playbackTracker = {
+      stop: () => {
+        send(); // last position before switching video
+        stopped = true;
+        clearInterval(timer);
+        document.removeEventListener("visibilitychange", onHidden);
+        window.removeEventListener("pagehide", send);
+        try {
+          currentPlayer.off("pause", send);
+          currentPlayer.off("ended", send);
+        } catch (err) {
+          // player disposed
+        }
+      },
+    };
+
+    // restore the saved position
+    try {
+      const res = await fetch(
+        `/api/v1/library/entry?session=${encodeURIComponent(sessionId)}&file=${file.index}`
+      );
+      const entry = res.ok ? await res.json() : null;
+      const pos = entry?.position || 0;
+      const dur = entry?.duration || 0;
+      const nearEnd = dur && pos > dur * 0.95;
+      if (
+        !stopped &&
+        player === currentPlayer &&
+        pos > RESUME_MIN_SECONDS &&
+        !nearEnd
+      ) {
+        const seek = () => {
+          if (stopped) {
+            return;
+          }
+          currentPlayer.currentTime(pos);
+          resumed = true;
+          butterup.toast({
+            message: `Resuming at ${formatClock(pos)}`,
+            location: "top-right",
+            icon: true,
+            dismissable: true,
+            type: "info",
+          });
+        };
+        if (currentPlayer.readyState() >= 1) {
+          seek();
+        } else {
+          currentPlayer.one("loadedmetadata", seek);
+        }
+        return;
+      }
+    } catch (err) {
+      console.warn("Could not load the saved position:", err);
+    }
+    resumed = true;
+  };
+
+  const renderLibrary = async () => {
+    const wrapper = document.querySelector("#library-wrapper");
+    const list = document.querySelector("#library-list");
+    let items = [];
+    try {
+      const res = await fetch("/api/v1/library");
+      items = res.ok ? await res.json() : [];
+    } catch (err) {
+      items = [];
+    }
+    list.innerHTML = "";
+    if (!Array.isArray(items) || !items.length) {
+      wrapper.classList.add("hidden");
+      return;
+    }
+    wrapper.classList.remove("hidden");
+
+    items.forEach((it, i) => {
+      // names come from torrents: untrusted, so textContent only
+      const row = document.createElement("div");
+      row.className =
+        "flex items-center gap-3 p-3" + (i < items.length - 1 ? " border-b" : "");
+
+      const info = document.createElement("div");
+      info.className = "flex flex-col gap-1 flex-1 min-w-0";
+      const title = document.createElement("span");
+      title.className = "text-sm font-semibold";
+      title.style.cssText =
+        "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+      title.textContent = it.fileName || it.title;
+      title.title = it.title;
+
+      const pct = it.size ? Math.floor((it.downloaded / it.size) * 100) : 0;
+      const parts = [];
+      if (it.watched) {
+        parts.push("Watched");
+      } else if (it.duration) {
+        parts.push(`${formatClock(it.position)} / ${formatClock(it.duration)}`);
+      }
+      if (pct >= 100) {
+        parts.push("Downloaded");
+      } else if (it.active) {
+        parts.push(`Downloading ${pct}%`);
+      } else {
+        parts.push(pct ? `${pct}% on disk` : "Not on disk");
+      }
+      const meta = document.createElement("span");
+      meta.className = "text-xs text-muted-foreground";
+      meta.textContent = parts.join(" · ");
+
+      const bar = document.createElement("div");
+      bar.className = "bg-muted rounded-full overflow-hidden";
+      bar.style.height = "4px";
+      const fill = document.createElement("div");
+      fill.className = "bg-primary";
+      fill.style.height = "100%";
+      fill.style.width =
+        (it.duration ? Math.min(100, (it.position / it.duration) * 100) : 0) +
+        "%";
+      bar.appendChild(fill);
+      info.append(title, meta, bar);
+
+      const playBtn = document.createElement("button");
+      playBtn.type = "button";
+      playBtn.className = "btn small shrink-0";
+      playBtn.textContent = it.watched ? "Watch again" : "Continue";
+      playBtn.addEventListener("click", () => {
+        document.querySelector("#magnet").value = it.magnet;
+        startPlayback({ fileIndex: it.fileIndex });
+      });
+
+      // two clicks to delete, no browser confirm() dialog
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "text-sm text-primary cursor-pointer shrink-0";
+      delBtn.textContent = "Delete";
+      let armed = null;
+      delBtn.addEventListener("click", async () => {
+        if (!armed) {
+          delBtn.textContent = "Sure?";
+          armed = setTimeout(() => {
+            armed = null;
+            delBtn.textContent = "Delete";
+          }, 3000);
+          return;
+        }
+        clearTimeout(armed);
+        const res = await fetch("/api/v1/library/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ infoHash: it.infoHash, fileIndex: it.fileIndex }),
+        }).catch(() => null);
+        butterup.toast({
+          message: res && res.ok ? "Deleted from disk" : "Could not delete",
+          location: "top-right",
+          icon: true,
+          dismissable: true,
+          type: res && res.ok ? "success" : "error",
+        });
+        renderLibrary();
+      });
+
+      row.append(info, playBtn, delBtn);
+      list.appendChild(row);
+    });
+  };
+  renderLibrary();
+
+  document
+    .querySelector("#save-library-settings")
+    .addEventListener("click", async () => {
+      const days = parseInt(
+        document.querySelector("#keepWatchedDays").value,
+        10
+      );
+      const res = await fetch("/api/v1/settings/library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keepWatchedDays: days }),
+      }).catch(() => null);
+      const data = res ? await res.json().catch(() => ({})) : {};
+      butterup.toast({
+        message:
+          res && res.ok ? "Library settings saved" : data.error || "Could not save",
+        location: "top-right",
+        icon: true,
+        dismissable: true,
+        type: res && res.ok ? "success" : "error",
+      });
+    });
+
+  // opts.fileIndex picks the video to open (used by "Continue watching")
+  async function startPlayback(opts = {}) {
     const magnet = document.querySelector("#magnet").value;
 
     if (!magnet) {
@@ -497,6 +812,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
     // clean up previous player
     if (player) {
+      stopTracking();
       player.dispose();
       player = null;
       const vidElm = document.createElement("video");
@@ -587,6 +903,9 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       return;
     }
 
+    const initialFile =
+      videoFiles.find((f) => f.index === opts.fileIndex) || videoFiles[0];
+
     const subtitleFiles = files.filter((f) =>
       f.name.match(/\.(srt|vtt|sub)$/i)
     );
@@ -618,7 +937,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         };
       });
     }
-    const chosen = await pickSource(sessionId, videoFiles[0]);
+    const chosen = await pickSource(sessionId, initialFile);
 
     if (chosen.mode === "unsupported") {
       showExternalPanel(chosen);
@@ -643,7 +962,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         sources: [{
           src: chosen.src,
           type: chosen.type,
-          label: videoFiles[0].name,
+          label: initialFile.name,
         }],
         tracks: subtitles,
         html5: {
@@ -691,7 +1010,8 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     player.doubleTapFF();
     setupChosenPlayback(chosen);
     // fire and forget: playback must not wait for the subtitle search
-    autoLoadSubtitles(sessionId, videoFiles[0]);
+    autoLoadSubtitles(sessionId, initialFile);
+    trackPlayback(sessionId, initialFile);
 
     document.querySelector("#video-player").style.display = "block";
 
@@ -719,7 +1039,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
           option.textContent = file.name;
           videoSelect.appendChild(option);
         });
-        videoSelect.value = String(videoFiles[0].index);
+        videoSelect.value = String(initialFile.index);
         videoSelect.addEventListener("change", async (e) => {
           const file = videoFiles.find(
             (f) => f.index === parseInt(e.target.value, 10)
@@ -730,9 +1050,11 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
             showExternalPanel(next);
             return;
           }
+          stopTracking();
           player.src({ src: next.src, type: next.type });
           setupChosenPlayback(next);
           autoLoadSubtitles(sessionId, file);
+          trackPlayback(sessionId, file);
           player.play();
         });
         document.querySelector("#video-player").appendChild(videoSelect);
@@ -1839,6 +2161,8 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     })
     .then((data) => {
       settings = data;
+      document.querySelector("#keepWatchedDays").value =
+        data.keepWatchedDays || 3;
       document.querySelector("#enablePublicSearch").checked =
         !data.disablePublicSearch;
       document.querySelectorAll(".search-source").forEach((el) => {

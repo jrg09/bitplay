@@ -13,6 +13,7 @@ BitPlay is a web application built with Go that allows you to stream video conte
 *   **Prowlarr Integration:** Connect to your Prowlarr instance to search across your configured indexers directly within BitPlay.
 *   **Jackett Integration:** Connect to your Jackett instance as an alternative search provider.
 *   **Subtitles:** Embedded SRT subtitles are converted to VTT on the fly, and you can upload your own `.srt`/`.vtt` file during playback.
+*   **Continue Watching:** Once a video starts, BitPlay downloads the whole file in the background, remembers where you stopped (on the server, so it follows you across devices) and lists it on the home page. Fully downloaded videos reopen instantly and play without peers. See [Continue watching](#continue-watching).
 *   **Built-in Torrent Search:** Search YTS, The Pirate Bay and EZTV directly from the page, no indexer needed. Results are merged with Prowlarr / Jackett (when enabled), de-duplicated by info hash and sorted by seeders. See [Torrent search](#torrent-search).
 *   **Automatic Subtitle Search (OpenSubtitles):** When enabled, BitPlay looks up subtitles for the video being played (by OpenSubtitles file hash when the end of the file is available, otherwise by the parsed title / season / episode / year), in the languages you configure (default `es,ea,sp,en`). The best match per language is attached to the player and the first language is shown automatically; the rest stay available in the captions menu. See [Automatic subtitles](#automatic-subtitles).
 *   **Optional Basic Auth:** Protect a publicly reachable instance with a username and password via environment variables.
@@ -120,6 +121,14 @@ BitPlay is configured primarily through its web interface after starting the app
     *   **Maintenance:** The fourth settings tab shows active torrent sessions, recent server logs, and a Purge Cache button that stops all sessions and deletes everything downloaded to disk.
 
 Settings are saved automatically to `/app/config/settings.json` inside the Docker container, which maps to `./config/settings.json` on the host via the mounted volume in the example Docker Compose setup above. API keys are never sent back to the browser once saved.
+
+### Continue watching
+
+*   When playback starts, the rest of the file keeps downloading in the background (the part you are watching is still fetched first). The session stays open until the download finishes, even if you close the page; a download that makes no progress for an hour stops holding it open.
+*   The playback position is saved every 10 seconds, on pause and when the page is closed, in `config/library.json`. Reopening the video, from any device, resumes there.
+*   The home page lists these videos under **Continue watching** with their progress and how much is on disk. *Delete* removes the file from disk.
+*   Each torrent's metainfo is saved in `torrent-data/.bitplay-meta/`, so reopening it does not wait for peers to send metadata. A fully downloaded video plays even with no peers at all.
+*   A video counts as watched past 95%. Watched videos are deleted after 3 days by default (Settings → Maintenance). *Purge Cache* still wipes everything.
 
 ### Torrent search
 
