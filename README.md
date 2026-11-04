@@ -212,7 +212,7 @@ With `network_mode: service:gluetun`, everything BitPlay does (tracker announces
 
 1.  **Configure Settings:** Set up your proxy and search providers (Prowlarr/Jackett) as described above.
 2.  **Search:** Use the search bar to query Prowlarr or Jackett for torrents.
-3.  **Add Torrent:** Paste a magnet link directly or click a search result to add the torrent to BitPlay.
+3.  **Add Torrent:** Paste a magnet link (or a bare info hash) into the search box and it starts playing right away, or search and click a result's *Watch* button.
 
     > BitPlay also supports opening from another app/program by providing torrent or magnet link as query parameter `torrent`. The link needs to be URL-encoded! 
     >

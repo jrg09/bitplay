@@ -29,9 +29,26 @@
           if (magnetInput) {
             magnetInput.value = decodedTorrent;
           }
+          const searchInput = document.getElementById("search");
+          if (searchInput) {
+            searchInput.value = decodedTorrent;
+          }
         }
       });
     </script>
+    <style>
+      /* subtitles: no black box behind the text, outline for legibility */
+      .video-js .vjs-text-track-display .vjs-text-track-cue,
+      .video-js .vjs-text-track-display .vjs-text-track-cue > div {
+        background-color: transparent !important;
+      }
+      .video-js .vjs-text-track-display .vjs-text-track-cue > div {
+        color: #fff !important;
+        text-shadow:
+          -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000,
+          0 0 6px #000 !important;
+      }
+    </style>
   </head>
 
   <body>
@@ -80,11 +97,11 @@
       >
         Stream torrents with ease
       </h1>
-      <div id="search-wrapper" class="hidden w-full">
+      <div id="search-wrapper" class="w-full">
         <form id="search-form" class="w-full flex items-center gap-3">
           <input
             class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive h-12 overflow-ellipsis overflow-hidden"
-            placeholder="Search..."
+            placeholder="Search movies and TV, or paste a magnet link"
             id="search"
             name="search"
             type="search"
@@ -146,13 +163,10 @@
           </table>
         </div>
         <div id="search-pagination" class="hidden"></div>
-        <div
-          class="w-full my-4 text-center text-sm font-semibold text-accent-foreground"
-        >
-          OR
-        </div>
       </div>
-      <form id="torrent-form" class="w-full flex items-center gap-3">
+      <!-- magnet box replaced by the search box (a pasted magnet plays);
+           kept hidden because startPlayback() reads #magnet -->
+      <form id="torrent-form" class="hidden w-full flex items-center gap-3">
         <div class="relative w-full">
           <input
             class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive h-12 pr-12 overflow-ellipsis overflow-hidden"
@@ -189,29 +203,6 @@
         </div>
         <button class="btn" type="submit">Play Now</button>
       </form>
-      <div
-        id="demo_torrent"
-        class="w-full rounded-lg p-3 text-center flex items-center gap-2 justify-center text-sm font-semibold text-accent-foreground border-2 mt-4 border-primary bg-secondary/50 cursor-pointer hover:bg-transparent transition-all"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="24"
-          height="24"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="lucide lucide-video w-6 h-6 inline-block"
-        >
-          <path
-            d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"
-          ></path>
-          <rect x="2" y="6" width="14" height="12" rx="2"></rect>
-        </svg>
-        Try Demo with Sintel (CC Movie)
-      </div>
       <div id="library-wrapper" class="hidden w-full mt-6 flex flex-col gap-3">
         <span class="text-muted-foreground text-sm font-semibold"
           >Continue watching</span

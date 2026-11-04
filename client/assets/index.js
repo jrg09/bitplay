@@ -73,13 +73,30 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     });
   });
 
-  // handle demo button
-  const demoButton = document.querySelector("#demo_torrent");
-  demoButton.addEventListener("click", async () => {
-    document.getElementById("magnet").value =
-      "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel&tr=udp%3A%2F%2Fexplodie.org%3A6969&tr=udp%3A%2F%2Ftracker.coppersurfer.tk%3A6969&tr=udp%3A%2F%2Ftracker.empire-js.us%3A1337&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337&tr=wss%3A%2F%2Ftracker.btorrent.xyz&tr=wss%3A%2F%2Ftracker.fastcast.nz&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&ws=https%3A%2F%2Fwebtorrent.io%2Ftorrents%2F&xs=https%3A%2F%2Fwebtorrent.io%2Ftorrents%2Fsintel.torrent";
+  // A magnet link or a bare info hash typed/pasted in the search box is
+  // played instead of searched
+  const asMagnet = (text) => {
+    const t = (text || "").trim();
+    if (/^magnet:\?/i.test(t)) {
+      return t;
+    }
+    if (/^[0-9a-f]{40}$/i.test(t) || /^[a-z2-7]{32}$/i.test(t)) {
+      return "magnet:?xt=urn:btih:" + t;
+    }
+    return null;
+  };
 
-    startPlayback();
+  // pasting a magnet starts playback right away
+  document.querySelector("#search").addEventListener("paste", (e) => {
+    const pasted = e.clipboardData?.getData("text") || "";
+    if (asMagnet(pasted)) {
+      // let the paste land in the box, then submit through the normal
+      // (cancelable) path
+      setTimeout(() => {
+        e.target.value = pasted.trim(); // replace whatever was typed before
+        document.querySelector("#search-form").requestSubmit();
+      }, 0);
+    }
   });
 
   const form = document.querySelector("#torrent-form");
@@ -1296,16 +1313,9 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     });
   });
 
-  // the search box is shown when any search backend is enabled
+  // the search box doubles as the magnet box, so it is always visible
   const updateSearchVisibility = () => {
-    const publicSearch =
-      !settings?.disablePublicSearch &&
-      (settings?.disabledSearchSources || []).length < 3;
-    if (publicSearch || settings?.enableProwlarr || settings?.enableJackett) {
-      searchWrapper.classList.remove("hidden");
-    } else {
-      searchWrapper.classList.add("hidden");
-    }
+    searchWrapper.classList.remove("hidden");
   };
 
   const updateSearchResults = () => {
@@ -1369,9 +1379,27 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     });
   };
 
-  document.querySelector("#search-form").addEventListener("submit", (e) => {
+  document.querySelector("#search-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const query = e.target.querySelector("#search").value;
+
+    const magnet = asMagnet(query);
+    if (magnet) {
+      const btn = e.target.querySelector("button[type=submit]");
+      btn.setAttribute("disabled", "disabled");
+      btn.classList.add("loader");
+      btn.innerHTML = "";
+      document.querySelector("#magnet").value = magnet;
+      try {
+        await startPlayback();
+      } finally {
+        btn.removeAttribute("disabled");
+        btn.classList.remove("loader");
+        btn.innerHTML = "Search";
+      }
+      return;
+    }
+
     if (!query) {
       butterup.toast({
         message: "Please enter a search query",
