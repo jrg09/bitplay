@@ -570,6 +570,7 @@ func main() {
 	http.HandleFunc("/api/v1/search", torrentSearchHandler)
 	http.HandleFunc("/api/v1/featured", featuredHandler)
 	http.HandleFunc("/api/v1/catalog", streamingCatalogHandler)
+	http.HandleFunc("/api/v1/series/", seriesHandler)
 	http.HandleFunc("/api/v1/settings/search", savePublicSearchSettingsHandler)
 	http.HandleFunc("/api/v1/prowlarr/search", searchFromProwlarr)
 	http.HandleFunc("/api/v1/jackett/search", searchFromJackett)
