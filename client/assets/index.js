@@ -1461,6 +1461,110 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     );
   };
 
+  // Featured titles (server: featured.go): tabs + poster grid; clicking a
+  // poster opens its torrents to pick one. Lists are cached per page load.
+  const featuredLoaded = {};
+  let featuredActive = null;
+
+  const showFeaturedDetail = (group) => {
+    const detail = document.querySelector("#featured-detail");
+    detail.innerHTML = "";
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "text-sm text-primary cursor-pointer";
+    close.style.cssText = "display:block;margin-left:auto";
+    close.textContent = "Close";
+    close.addEventListener("click", () => detail.classList.add("hidden"));
+
+    const row = document.createElement("div");
+    row.className = "flex gap-3";
+    const body = document.createElement("div");
+    body.className = "flex flex-col gap-2 flex-1 min-w-0";
+    body.append(
+      buildMetaHeader(group.meta),
+      buildTorrentList(group.results || [], 6)
+    );
+    row.append(buildPoster(group.meta, 100, 148), body);
+
+    detail.append(close, row);
+    detail.classList.remove("hidden");
+    detail.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
+
+  const buildFeaturedTile = (group) => {
+    const meta = group.meta || {};
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = "flex flex-col gap-2 cursor-pointer";
+    tile.style.cssText =
+      "text-align:left;min-width:0;background:none;border:0;padding:0";
+    tile.title = meta.title || "";
+
+    const poster = buildPoster(meta);
+    poster.style.cssText = "width:100%;aspect-ratio:2/3";
+
+    const name = document.createElement("span");
+    name.className = "text-sm font-semibold";
+    name.style.cssText = ellipsis;
+    name.textContent = meta.title || "";
+
+    const sub = document.createElement("span");
+    sub.className = "text-xs text-muted-foreground";
+    sub.textContent = [meta.year, meta.rating ? `★ ${meta.rating}` : ""]
+      .filter(Boolean)
+      .join(" · ");
+
+    tile.append(poster, name, sub);
+    tile.addEventListener("click", () => showFeaturedDetail(group));
+    return tile;
+  };
+
+  const loadFeaturedList = async (id) => {
+    featuredActive = id;
+    document.querySelectorAll(".featured-tab").forEach((b) => {
+      const on = b.dataset.list === id;
+      b.classList.toggle("bg-primary", on);
+      b.classList.toggle("text-primary-foreground", on);
+      b.classList.toggle("bg-muted", !on);
+    });
+    document.querySelector("#featured-detail").classList.add("hidden");
+    const grid = document.querySelector("#featured-grid");
+    const status = document.querySelector("#featured-status");
+    grid.innerHTML = "";
+
+    let groups = featuredLoaded[id];
+    if (!groups) {
+      status.textContent = "Loading…";
+      try {
+        const res = await fetch(
+          `/api/v1/featured?list=${encodeURIComponent(id)}`
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || "Could not load this list");
+        }
+        groups = Array.isArray(data.groups) ? data.groups : [];
+        featuredLoaded[id] = groups;
+      } catch (err) {
+        if (featuredActive === id) {
+          status.textContent = err.message;
+        }
+        return;
+      }
+    }
+    if (featuredActive !== id) {
+      return; // another tab was picked while this one loaded
+    }
+    status.textContent = groups.length ? "" : "Nothing to show right now";
+    groups.forEach((g) => grid.appendChild(buildFeaturedTile(g)));
+  };
+
+  document.querySelectorAll(".featured-tab").forEach((b) =>
+    b.addEventListener("click", () => loadFeaturedList(b.dataset.list))
+  );
+  loadFeaturedList("popular");
+
   document.querySelector("#search-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const query = e.target.querySelector("#search").value;

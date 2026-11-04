@@ -178,6 +178,28 @@
         >
         <div id="library-list" class="w-full border rounded-lg"></div>
       </div>
+      <!-- Featured titles from YTS / TPB (server: featured.go) -->
+      <div id="featured-wrapper" class="w-full mt-6 flex flex-col gap-3">
+        <div class="flex items-center gap-2" style="flex-wrap: wrap">
+          <span class="text-muted-foreground text-sm font-semibold"
+            >Featured</span
+          >
+            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="popular">Popular</button>
+            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="recent">Recently added</button>
+            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="top-movies">Top movies</button>
+            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="top-tv">Top TV</button>
+        </div>
+        <div id="featured-detail" class="hidden border rounded-lg p-3"></div>
+        <p id="featured-status" class="text-sm text-muted-foreground"></p>
+        <div
+          id="featured-grid"
+          style="
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            gap: 12px;
+          "
+        ></div>
+      </div>
       <div
         id="torrent_file_wrapper"
         class="w-full relative rounded-lg p-3 py-10 text-center flex flex-col items-center gap-4 justify-center text-sm font-semibold text-accent-foreground mt-7 border-2 border-foreground/30 border-dashed bg-secondary/50 cursor-pointer hover:bg-transparent transition-all"

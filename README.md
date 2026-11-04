@@ -13,6 +13,7 @@ BitPlay is a web application built with Go that allows you to stream video conte
 *   **Prowlarr Integration:** Connect to your Prowlarr instance to search across your configured indexers directly within BitPlay.
 *   **Jackett Integration:** Connect to your Jackett instance as an alternative search provider.
 *   **Subtitles:** Embedded SRT subtitles are converted to VTT on the fly, and you can upload your own `.srt`/`.vtt` file during playback.
+*   **Featured & Rich Results:** The home page shows popular, recently added and top movies / TV (YTS and The Pirate Bay) as a poster grid, and search results are grouped by title with poster, year, rating and IMDb link (metadata from Cinemeta, no API key needed).
 *   **Continue Watching:** Once a video starts, BitPlay downloads the whole file in the background, remembers where you stopped (on the server, so it follows you across devices) and lists it on the home page. Fully downloaded videos reopen instantly and play without peers. See [Continue watching](#continue-watching).
 *   **Built-in Torrent Search:** Search YTS, The Pirate Bay and EZTV directly from the page, no indexer needed. Results are merged with Prowlarr / Jackett (when enabled), de-duplicated by info hash and sorted by seeders. See [Torrent search](#torrent-search).
 *   **Automatic Subtitle Search (OpenSubtitles):** When enabled, BitPlay looks up subtitles for the video being played (by OpenSubtitles file hash when the end of the file is available, otherwise by the parsed title / season / episode / year), in the languages you configure (default `es,ea,sp,en`). The best match per language is attached to the player and the first language is shown automatically; the rest stay available in the captions menu. See [Automatic subtitles](#automatic-subtitles).
@@ -121,6 +122,11 @@ BitPlay is configured primarily through its web interface after starting the app
     *   **Maintenance:** The fourth settings tab shows active torrent sessions, recent server logs, and a Purge Cache button that stops all sessions and deletes everything downloaded to disk.
 
 Settings are saved automatically to `/app/config/settings.json` inside the Docker container, which maps to `./config/settings.json` on the host via the mounted volume in the example Docker Compose setup above. API keys are never sent back to the browser once saved.
+
+### Featured titles and posters
+
+*   **Featured** on the home page has four tabs: *Popular* (YTS, most downloaded), *Recently added* (YTS), *Top movies* and *Top TV* (The Pirate Bay top 100 HD). Click a poster to pick one of its torrents. Lists are cached for 30 minutes.
+*   Search results are grouped by title: poster, year, rating, genres and IMDb link come from [Cinemeta](https://v3-cinemeta.strem.io) using the IMDb id the source provides, or the title and year parsed from the torrent name (exact title matches only). Torrents that can't be identified are listed under *Other results*. If Cinemeta is unreachable, search still works without posters.
 
 ### Continue watching
 
