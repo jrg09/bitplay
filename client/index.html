@@ -119,48 +119,17 @@
         </form>
         <div
           id="search-result"
-          class="mt-4 border rounded-lg overflow-auto max-h-[500px] bg-accent/50 hidden"
+          class="mt-4 border rounded-lg overflow-auto bg-accent/50 hidden"
+          style="max-height: 75vh"
         >
-          <table class="w-full caption-bottom text-sm">
-            <thead>
-              <tr class="bg-muted text-muted-foreground border-b">
-                <th class="p-3 text-left">Name</th>
-                <th class="p-3 text-left">Indexer</th>
-                <th
-                  class="p-3 text-left cursor-pointer"
-                  data-sort="sizeBytes"
-                  title="Sort by size"
-                >
-                  Size
-                </th>
-                <th
-                  class="p-3 text-left cursor-pointer"
-                  data-sort="seeders"
-                  title="Sort by seeders"
-                >
-                  Seeders
-                </th>
-                <th class="p-3 text-left w-[10px]"></th>
-              </tr>
-            </thead>
-            <tbody
-              id="search-result-body"
-              class="divide-y [&_td]:px-3 [&_td]:py-2 [&_td]:whitespace-nowrap [&_td]:max-w-[200px] [&_td]:overflow-hidden [&_td]:text-ellipsis"
-            >
-              <tr>
-                <td colspan="5" class="py-10 px-6 text-center">
-                  No results found
-                </td>
-              </tr>
-            </tbody>
-            <tfoot class="hidden">
-              <tr>
-                <td colspan="5" class="py-10 px-6 text-center">
-                  No results found
-                </td>
-              </tr>
-            </tfoot>
-          </table>
+          <!-- one card per title (poster, year, IMDb) with its torrents -->
+          <div id="search-groups" class="flex flex-col"></div>
+          <p
+            id="search-empty"
+            class="hidden p-3 text-center text-sm text-muted-foreground"
+          >
+            No results found
+          </p>
         </div>
         <div id="search-pagination" class="hidden"></div>
       </div>

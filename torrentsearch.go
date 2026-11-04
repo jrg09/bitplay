@@ -938,11 +938,18 @@ func torrentSearchHandler(w http.ResponseWriter, r *http.Request) {
 	if results == nil {
 		results = []searchResult{}
 	}
-	log.Printf("Search: %q (%s) -> %d result(s)", query, category, len(results))
+	// poster / year / IMDb per title (metadata.go); own time budget, the
+	// search deadline may be almost spent
+	groups := enrichResults(r.Context(), results)
+	if groups == nil {
+		groups = []resultGroup{}
+	}
+	log.Printf("Search: %q (%s) -> %d result(s), %d group(s)", query, category, len(results), len(groups))
 	respondWithJSON(w, http.StatusOK, map[string]interface{}{
 		"query":    query,
 		"category": category,
 		"results":  results,
+		"groups":   groups,
 		"sources":  statuses,
 	})
 }

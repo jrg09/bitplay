@@ -1278,105 +1278,187 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
   let searchData = [];
   let searchPage = 1;
-  let searchPageSize = 10;
-  // null key = server order (seeders, then date)
-  let searchSort = { key: null, dir: -1 };
-
-  const updateSortIndicators = () => {
-    document.querySelectorAll("#search-result th[data-sort]").forEach((th) => {
-      const base = th.dataset.label || th.textContent.trim();
-      th.dataset.label = base;
-      const arrow =
-        searchSort.key === th.dataset.sort
-          ? searchSort.dir > 0
-            ? " ▴"
-            : " ▾"
-          : "";
-      th.textContent = base + arrow;
-    });
-  };
-
-  document.querySelectorAll("#search-result th[data-sort]").forEach((th) => {
-    th.addEventListener("click", () => {
-      const key = th.dataset.sort;
-      // first click: descending, second: ascending
-      searchSort =
-        searchSort.key === key
-          ? { key, dir: -searchSort.dir }
-          : { key, dir: -1 };
-      searchData = [...searchData].sort(
-        (a, b) => ((a[key] || 0) - (b[key] || 0)) * searchSort.dir
-      );
-      searchPage = 1;
-      updateSortIndicators();
-      updateSearchResults();
-    });
-  });
-
+  let searchPageSize = 5; // title groups per page
   // the search box doubles as the magnet box, so it is always visible
   const updateSearchVisibility = () => {
     searchWrapper.classList.remove("hidden");
   };
 
+  // Results arrive grouped by title (server: metadata.go). Torrent names and
+  // metadata are untrusted: DOM is built with textContent, posters only
+  // from https URLs.
+  const GROUP_TORRENTS_SHOWN = 4;
+
+  const playFromButton = (btn, magnet) => {
+    document.querySelector("#magnet").value = magnet;
+    startPlayback();
+    btn.setAttribute("disabled", "disabled");
+    btn.innerHTML = "";
+    btn.classList.add("loader");
+  };
+
+  const ellipsis = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+
+  const buildPoster = (meta, width = 70, height = 104) => {
+    const box = document.createElement("div");
+    box.className = "bg-muted rounded-md overflow-hidden shrink-0";
+    box.style.cssText = `width:${width}px;height:${height}px`;
+    if (meta?.poster && meta.poster.startsWith("https://")) {
+      const img = document.createElement("img");
+      img.src = meta.poster;
+      img.alt = meta.title || "";
+      img.loading = "lazy";
+      img.referrerPolicy = "no-referrer";
+      img.style.cssText = "width:100%;height:100%;object-fit:cover";
+      img.addEventListener("error", () => img.remove());
+      box.appendChild(img);
+    }
+    return box;
+  };
+
+  const buildTorrentRow = (result) => {
+    const row = document.createElement("div");
+    row.className = "flex items-center gap-3";
+
+    const text = document.createElement("div");
+    text.className = "flex flex-col flex-1 min-w-0";
+    const name = document.createElement("span");
+    name.className = "text-sm";
+    name.style.cssText = ellipsis;
+    name.textContent = result.title;
+    name.title = result.title;
+    const info = document.createElement("span");
+    info.className = "text-xs text-muted-foreground";
+    info.style.cssText = ellipsis;
+    info.textContent = [
+      result.size,
+      `${result.seeders ?? 0} seeders`,
+      result.indexer,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    text.append(name, info);
+
+    const watchBtn = document.createElement("button");
+    watchBtn.type = "button";
+    watchBtn.className = "btn small shrink-0 play-torrent"; // reset by startPlayback on failure
+    watchBtn.textContent = "Watch";
+    watchBtn.addEventListener("click", () =>
+      playFromButton(watchBtn, result.downloadUrl || result.magnetUrl || "")
+    );
+
+    row.append(text, watchBtn);
+    return row;
+  };
+
+  // title, year, rating, type, IMDb link and genres of a title
+  const buildMetaHeader = (meta) => {
+    const wrap = document.createElement("div");
+    wrap.className = "flex flex-col";
+    wrap.style.gap = "4px"; // gap-1 is not in the compiled CSS
+    const header = document.createElement("div");
+    header.className = "flex items-center gap-2";
+    header.style.flexWrap = "wrap";
+    const title = document.createElement("span");
+    title.className = "font-semibold";
+    title.textContent = meta ? meta.title : "Other results";
+    header.appendChild(title);
+    if (meta) {
+      const details = [];
+      if (meta.year) details.push(meta.year);
+      if (meta.rating) details.push(`★ ${meta.rating}`);
+      details.push(meta.type === "series" ? "Series" : "Movie");
+      const d = document.createElement("span");
+      d.className = "text-sm text-muted-foreground";
+      d.textContent = details.join(" · ");
+      header.appendChild(d);
+      if (/^tt\d+$/.test(meta.imdb)) {
+        const link = document.createElement("a");
+        link.className = "text-xs text-primary";
+        link.href = `https://www.imdb.com/title/${meta.imdb}/`;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = `IMDb ${meta.imdb}`;
+        header.appendChild(link);
+      }
+    }
+    wrap.appendChild(header);
+    if (meta?.genres?.length) {
+      const genres = document.createElement("span");
+      genres.className = "text-xs text-muted-foreground";
+      genres.textContent = meta.genres.slice(0, 4).join(", ");
+      wrap.appendChild(genres);
+    }
+    return wrap;
+  };
+
+  // torrent rows with a "Show N more" toggle
+  const buildTorrentList = (results, shownByDefault = GROUP_TORRENTS_SHOWN) => {
+    const list = document.createElement("div");
+    list.className = "flex flex-col gap-2";
+    let expanded = false;
+    const renderRows = () => {
+      list.innerHTML = "";
+      const shown = expanded ? results : results.slice(0, shownByDefault);
+      shown.forEach((r) => list.appendChild(buildTorrentRow(r)));
+      if (results.length > shownByDefault) {
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "text-xs text-primary cursor-pointer";
+        more.style.alignSelf = "flex-start";
+        more.textContent = expanded
+          ? "Show less"
+          : `Show ${results.length - shownByDefault} more`;
+        more.addEventListener("click", () => {
+          expanded = !expanded;
+          renderRows();
+        });
+        list.appendChild(more);
+      }
+    };
+    renderRows();
+    return list;
+  };
+
+  const buildGroupCard = (group, isLast) => {
+    const meta = group.meta;
+    const card = document.createElement("div");
+    card.className = "flex gap-3 p-3" + (isLast ? "" : " border-b");
+    if (meta) {
+      card.appendChild(buildPoster(meta));
+    }
+    const body = document.createElement("div");
+    body.className = "flex flex-col gap-2 flex-1 min-w-0";
+    body.append(buildMetaHeader(meta), buildTorrentList(group.results || []));
+    card.appendChild(body);
+    return card;
+  };
+
   const updateSearchResults = () => {
-    const searchPagination = document.querySelector("#search-pagination");
     const searchResults = document.querySelector("#search-result");
+    const container = document.querySelector("#search-groups");
+    const empty = document.querySelector("#search-empty");
     searchResults.classList.remove("hidden");
-    searchResults.querySelector("tbody").innerHTML = "";
-    searchResults.querySelector("tfoot").classList.add("hidden");
+    container.innerHTML = "";
+    empty.classList.toggle("hidden", searchData.length > 0);
     if (searchData.length === 0) {
-      searchResults.querySelector("tfoot").classList.remove("hidden");
+      document.querySelector("#search-pagination").classList.add("hidden");
       return;
     }
 
     const start = (searchPage - 1) * searchPageSize;
-    const end = start + searchPageSize;
-    const results = searchData.slice(start, end);
-    results.forEach((result) => {
-      // indexer data is untrusted, build with textContent
-      const row = document.createElement("tr");
-      [
-        result.title,
-        result.indexer,
-        result.size,
-        `${result.leechers}/${result.seeders}`,
-      ].forEach((text) => {
-        const td = document.createElement("td");
-        td.textContent = text ?? "";
-        row.appendChild(td);
-      });
-      const actionTd = document.createElement("td");
-      const watchBtn = document.createElement("button");
-      watchBtn.type = "button";
-      watchBtn.className = "btn small play-torrent";
-      watchBtn.dataset.magnet = result.downloadUrl || result.magnetUrl || "";
-      watchBtn.textContent = "Watch";
-      actionTd.appendChild(watchBtn);
-      row.appendChild(actionTd);
-      searchResults.querySelector("tbody").appendChild(row);
-    });
+    const page = searchData.slice(start, start + searchPageSize);
+    page.forEach((group, i) =>
+      container.appendChild(buildGroupCard(group, i === page.length - 1))
+    );
+    searchResults.scrollTop = 0;
 
-    // Generate pagination
-    const totalResults = searchData.length;
-    const totalPages = Math.ceil(totalResults / searchPageSize);
     generatePagination(
       searchPage,
       searchPageSize,
-      totalResults,
+      searchData.length,
       "#search-pagination"
     );
-
-    // Add event listener to each play button
-    searchResults.querySelectorAll(".play-torrent").forEach((el) => {
-      el.addEventListener("click", async (e) => {
-        const magnet = e.target.getAttribute("data-magnet");
-        document.querySelector("#magnet").value = magnet;
-        startPlayback();
-        e.target.setAttribute("disabled", "disabled");
-        e.target.innerHTML = "";
-        e.target.classList.add("loader");
-      });
-    });
   };
 
   document.querySelector("#search-form").addEventListener("submit", async (e) => {
@@ -1440,9 +1522,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         return res.json();
       })
       .then((data) => {
-        searchData = Array.isArray(data?.results) ? data.results : [];
-        searchSort = { key: null, dir: -1 };
-        updateSortIndicators();
+        searchData = Array.isArray(data?.groups) ? data.groups : [];
 
         const failed = (data?.sources || []).filter((s) => !s.ok);
         if (failed.length) {
