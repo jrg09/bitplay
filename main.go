@@ -566,6 +566,8 @@ func main() {
 	http.HandleFunc("/api/v1/library/entry", libraryEntryHandler)
 	http.HandleFunc("/api/v1/library/progress", libraryProgressHandler)
 	http.HandleFunc("/api/v1/library/delete", libraryDeleteHandler)
+	http.HandleFunc("/api/v1/library/shows", libraryShowsHandler)
+	http.HandleFunc("/api/v1/library/shows/hide", libraryShowHideHandler)
 	http.HandleFunc("/api/v1/settings/library", saveLibrarySettingsHandler)
 	http.HandleFunc("/api/v1/search", torrentSearchHandler)
 	http.HandleFunc("/api/v1/featured", featuredHandler)

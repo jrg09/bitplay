@@ -68,6 +68,7 @@ type libraryEntry struct {
 type libraryData struct {
 	Torrents map[string]*libraryTorrent `json:"torrents"`
 	Entries  map[string]*libraryEntry   `json:"entries"`
+	Shows    map[string]*showProgress   `json:"shows,omitempty"` // shows.go
 }
 
 var library = struct {
@@ -97,6 +98,9 @@ func libraryLocked() *libraryData {
 		}
 		if library.data.Entries == nil {
 			library.data.Entries = map[string]*libraryEntry{}
+		}
+		if library.data.Shows == nil {
+			library.data.Shows = map[string]*showProgress{}
 		}
 	}
 	return library.data
@@ -396,6 +400,8 @@ type libraryProgressRequest struct {
 	File     int     `json:"file"`
 	Position float64 `json:"position"`
 	Duration float64 `json:"duration"`
+	// set when playing from the series view (shows.go)
+	Series *seriesRef `json:"series,omitempty"`
 }
 
 // libraryProgressHandler: POST /api/v1/library/progress
@@ -462,6 +468,7 @@ func libraryProgressHandler(w http.ResponseWriter, r *http.Request) {
 		e.CompletedAt = time.Now().Unix()
 	}
 	e.UpdatedAt = time.Now().Unix()
+	showRecordProgressLocked(lib, in.Series, e)
 	resp := map[string]interface{}{
 		"downloaded": done,
 		"size":       e.Size,
@@ -478,6 +485,8 @@ func libraryProgressHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // libraryEntryHandler: GET /api/v1/library/entry?session=<hash>&file=<idx>
+// [&imdb=<tt>&season=N&episode=M]: without a saved position for this file,
+// the episode's position (maybe from another torrent) is used.
 func libraryEntryHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -491,9 +500,19 @@ func libraryEntryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	library.Lock()
 	defer library.Unlock()
-	if e := libraryLocked().Entries[libraryKey(hash, idx)]; e != nil {
+	lib := libraryLocked()
+	if e := lib.Entries[libraryKey(hash, idx)]; e != nil {
 		respondWithJSON(w, http.StatusOK, e)
 		return
+	}
+	q := r.URL.Query()
+	season, _ := strconv.Atoi(q.Get("season"))
+	episode, _ := strconv.Atoi(q.Get("episode"))
+	if sp := lib.Shows[q.Get("imdb")]; sp != nil {
+		if ep := sp.Episodes[episodeKey(season, episode)]; ep != nil && ep.Duration > 0 {
+			respondWithJSON(w, http.StatusOK, map[string]interface{}{"position": ep.Position, "duration": ep.Duration})
+			return
+		}
 	}
 	respondWithJSON(w, http.StatusOK, map[string]interface{}{"position": 0})
 }
@@ -504,6 +523,7 @@ type libraryListItem struct {
 	OnDisk  int64  `json:"onDisk"` // bytes of the file present on disk
 	Active  bool   `json:"active"` // a session is open right now
 	Watched bool   `json:"watched"`
+	Show    string `json:"show,omitempty"` // IMDb id of the series it belongs to
 }
 
 // libraryListHandler: GET /api/v1/library (most recent first)
@@ -515,8 +535,9 @@ func libraryListHandler(w http.ResponseWriter, r *http.Request) {
 	library.Lock()
 	lib := libraryLocked()
 	items := make([]libraryListItem, 0, len(lib.Entries))
-	for _, e := range lib.Entries {
-		item := libraryListItem{libraryEntry: *e, Watched: e.WatchedAt > 0}
+	linked := showLinkedFilesLocked(lib)
+	for key, e := range lib.Entries {
+		item := libraryListItem{libraryEntry: *e, Watched: e.WatchedAt > 0, Show: linked[key]}
 		if rec := lib.Torrents[e.InfoHash]; rec != nil {
 			item.Magnet = rec.Magnet
 		}

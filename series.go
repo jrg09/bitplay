@@ -556,15 +556,24 @@ func loadSeriesTorrents(ctx context.Context, info *seriesInfo, season, episode i
 //
 //	GET /api/v1/series/<tt>                               seasons + episodes
 //	GET /api/v1/series/<tt>/torrents?season=N[&episode=M] episode torrents + packs
+//	POST /api/v1/series/<tt>/mark                         watched marks (shows.go)
 func seriesHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/series/"), "/"), "/")
 	id := parts[0]
-	if !imdbIDRe.MatchString(id) || len(parts) > 2 || (len(parts) == 2 && parts[1] != "torrents") {
+	action := ""
+	if len(parts) == 2 {
+		action = parts[1]
+	}
+	if !imdbIDRe.MatchString(id) || len(parts) > 2 || (action != "" && action != "torrents" && action != "mark") {
 		respondWithJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+		return
+	}
+	wantMethod := http.MethodGet
+	if action == "mark" {
+		wantMethod = http.MethodPost
+	}
+	if r.Method != wantMethod {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -574,8 +583,18 @@ func seriesHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(w, http.StatusBadGateway, map[string]string{"error": "Could not load this series"})
 		return
 	}
-	if len(parts) == 1 {
-		respondWithJSON(w, http.StatusOK, info)
+	switch action {
+	case "":
+		sp, progress := showSnapshot(id)
+		respondWithJSON(w, http.StatusOK, map[string]interface{}{
+			"meta":     info.Meta,
+			"seasons":  info.Seasons,
+			"progress": progress, // "S02E05" -> {position, duration, watched}
+			"next":     findNextEpisode(info, sp),
+		})
+		return
+	case "mark":
+		seriesMarkHandler(w, r, info)
 		return
 	}
 

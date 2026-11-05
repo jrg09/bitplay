@@ -533,7 +533,8 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     }
   };
 
-  const trackPlayback = async (sessionId, file) => {
+  // series = {imdb, title, poster, season, episode} when playing an episode
+  const trackPlayback = async (sessionId, file, series = null) => {
     stopTracking();
     const currentPlayer = player;
     if (!currentPlayer) {
@@ -547,6 +548,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     let resumed = false;
     let sawIncomplete = false;
     let listRefreshed = false;
+    let wasWatched = null;
 
     const send = () => {
       if (stopped || player !== currentPlayer) {
@@ -571,6 +573,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
           file: file.index,
           position,
           duration,
+          series: series || undefined,
         }),
         keepalive: true, // still delivered when the page is closing
       })
@@ -599,6 +602,11 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
             listRefreshed = true;
             renderLibrary();
           }
+          if (series && wasWatched !== null && d.watched !== wasWatched) {
+            refreshSeriesProgress(series.imdb); // ✓ in the episode list
+            renderLibrary();
+          }
+          wasWatched = d.watched;
         })
         .catch(() => {});
     };
@@ -642,7 +650,10 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     // restore the saved position
     try {
       const res = await fetch(
-        `/api/v1/library/entry?session=${encodeURIComponent(sessionId)}&file=${file.index}`
+        `/api/v1/library/entry?session=${encodeURIComponent(sessionId)}&file=${file.index}` +
+          (series
+            ? `&imdb=${encodeURIComponent(series.imdb)}&season=${series.season}&episode=${series.episode}`
+            : "")
       );
       const entry = res.ok ? await res.json() : null;
       const pos = entry?.position || 0;
@@ -681,111 +692,223 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     resumed = true;
   };
 
+  // two clicks to confirm, no browser confirm() dialog
+  const twoClickButton = (label, onConfirm) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "text-sm text-primary cursor-pointer shrink-0";
+    btn.textContent = label;
+    let armed = null;
+    btn.addEventListener("click", () => {
+      if (!armed) {
+        btn.textContent = "Sure?";
+        armed = setTimeout(() => {
+          armed = null;
+          btn.textContent = label;
+        }, 3000);
+        return;
+      }
+      clearTimeout(armed);
+      armed = null;
+      onConfirm();
+    });
+    return btn;
+  };
+
+  // one downloaded / in-progress file
+  const buildLibraryRow = (it) => {
+    // names come from torrents: untrusted, so textContent only
+    const row = document.createElement("div");
+    row.className = "flex items-center gap-3 p-3 border-b";
+
+    const info = document.createElement("div");
+    info.className = "flex flex-col gap-1 flex-1 min-w-0";
+    const title = document.createElement("span");
+    title.className = "text-sm font-semibold";
+    title.style.cssText = ellipsis;
+    title.textContent = it.fileName || it.title;
+    title.title = it.title;
+
+    const pct = it.size ? Math.floor((it.downloaded / it.size) * 100) : 0;
+    const parts = [];
+    if (it.watched) {
+      parts.push("Watched");
+    } else if (it.duration) {
+      parts.push(`${formatClock(it.position)} / ${formatClock(it.duration)}`);
+    }
+    if (pct >= 100) {
+      parts.push("Downloaded");
+    } else if (it.active) {
+      parts.push(`Downloading ${pct}%`);
+    } else {
+      parts.push(pct ? `${pct}% on disk` : "Not on disk");
+    }
+    const meta = document.createElement("span");
+    meta.className = "text-xs text-muted-foreground";
+    meta.textContent = parts.join(" · ");
+
+    const bar = document.createElement("div");
+    bar.className = "bg-muted rounded-full overflow-hidden";
+    bar.style.height = "4px";
+    const fill = document.createElement("div");
+    fill.className = "bg-primary";
+    fill.style.height = "100%";
+    fill.style.width =
+      (it.duration ? Math.min(100, (it.position / it.duration) * 100) : 0) + "%";
+    bar.appendChild(fill);
+    info.append(title, meta, bar);
+
+    const playBtn = document.createElement("button");
+    playBtn.type = "button";
+    playBtn.className = "btn small shrink-0";
+    playBtn.textContent = it.watched ? "Watch again" : "Continue";
+    playBtn.addEventListener("click", () => {
+      document.querySelector("#magnet").value = it.magnet;
+      startPlayback({ fileIndex: it.fileIndex });
+    });
+
+    const delBtn = twoClickButton("Delete", async () => {
+      const res = await fetch("/api/v1/library/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ infoHash: it.infoHash, fileIndex: it.fileIndex }),
+      }).catch(() => null);
+      butterup.toast({
+        message: res && res.ok ? "Deleted from disk" : "Could not delete",
+        location: "top-right",
+        icon: true,
+        dismissable: true,
+        type: res && res.ok ? "success" : "error",
+      });
+      renderLibrary();
+    });
+
+    row.append(info, playBtn, delBtn);
+    return row;
+  };
+
+  // one series: its next episode, plus its files folded underneath
+  const buildShowRow = (show, files) => {
+    const meta = { imdb: show.imdb, title: show.title, poster: show.poster, type: "series" };
+    const wrap = document.createElement("div");
+    wrap.className = "flex flex-col border-b";
+    const row = document.createElement("div");
+    row.className = "flex items-center gap-3 p-3";
+
+    const info = document.createElement("div");
+    info.className = "flex flex-col gap-1 flex-1 min-w-0";
+    const title = document.createElement("span");
+    title.className = "text-sm font-semibold";
+    title.style.cssText = ellipsis;
+    title.textContent = show.title;
+    const sub = document.createElement("span");
+    sub.className = "text-xs text-muted-foreground";
+    sub.style.cssText = ellipsis;
+    const next = show.next;
+    sub.textContent = next
+      ? `${next.resume ? "Continue" : "Next"}: ${episodeCode(next.season, next.episode)} · ${next.name}${
+          next.aired ? "" : " (not aired yet)"
+        }`
+      : "All caught up";
+    info.append(title, sub);
+
+    const buttons = document.createElement("div");
+    buttons.className = "flex items-center gap-3 shrink-0";
+    const main = document.createElement("button");
+    main.type = "button";
+    main.className = "btn small shrink-0";
+    if (next?.resume && show.resumeMagnet) {
+      main.textContent = "Continue";
+      main.addEventListener("click", () => {
+        document.querySelector("#magnet").value = show.resumeMagnet;
+        startPlayback({
+          fileIndex: show.resumeFile,
+          episode: { ...meta, season: next.season, episode: next.episode },
+        });
+      });
+    } else {
+      main.textContent = next ? "Next episode" : "Episodes";
+      main.addEventListener("click", () =>
+        openSeries(meta, next ? { season: next.season, episode: next.episode } : null)
+      );
+    }
+    buttons.appendChild(main);
+    if (main.textContent !== "Episodes") {
+      const eps = document.createElement("button");
+      eps.type = "button";
+      eps.className = "text-sm text-primary cursor-pointer";
+      eps.textContent = "Episodes";
+      eps.addEventListener("click", () => openSeries(meta));
+      buttons.appendChild(eps);
+    }
+    buttons.appendChild(
+      twoClickButton("Remove", async () => {
+        await fetch("/api/v1/library/shows/hide", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imdb: show.imdb }),
+        }).catch(() => null);
+        renderLibrary();
+      })
+    );
+
+    row.append(buildPoster(meta, 46, 68), info, buttons);
+    wrap.appendChild(row);
+
+    if (files.length) {
+      const fileList = document.createElement("div");
+      fileList.className = "hidden flex flex-col";
+      fileList.style.marginLeft = "58px";
+      files.forEach((f) => fileList.appendChild(buildLibraryRow(f)));
+      fileList.lastElementChild?.classList.remove("border-b");
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "text-xs text-primary cursor-pointer";
+      toggle.style.cssText = "align-self:flex-start;margin:0 0 8px 70px";
+      const label = `Files on disk (${files.length})`;
+      toggle.textContent = label;
+      toggle.addEventListener("click", () => {
+        const open = fileList.classList.toggle("hidden") === false;
+        toggle.textContent = open ? "Hide files" : label;
+      });
+      wrap.append(toggle, fileList);
+    }
+    return wrap;
+  };
+
   const renderLibrary = async () => {
     const wrapper = document.querySelector("#library-wrapper");
     const list = document.querySelector("#library-list");
-    let items = [];
-    try {
-      const res = await fetch("/api/v1/library");
-      items = res.ok ? await res.json() : [];
-    } catch (err) {
-      items = [];
-    }
+    const getJSON = (url) =>
+      fetch(url)
+        .then((res) => (res.ok ? res.json() : []))
+        .catch(() => []);
+    let [items, shows] = await Promise.all([
+      getJSON("/api/v1/library"),
+      getJSON("/api/v1/library/shows"),
+    ]);
+    items = Array.isArray(items) ? items : [];
+    shows = Array.isArray(shows) ? shows : [];
     list.innerHTML = "";
-    if (!Array.isArray(items) || !items.length) {
+    if (!items.length && !shows.length) {
       wrapper.classList.add("hidden");
       return;
     }
     wrapper.classList.remove("hidden");
 
-    items.forEach((it, i) => {
-      // names come from torrents: untrusted, so textContent only
-      const row = document.createElement("div");
-      row.className =
-        "flex items-center gap-3 p-3" + (i < items.length - 1 ? " border-b" : "");
-
-      const info = document.createElement("div");
-      info.className = "flex flex-col gap-1 flex-1 min-w-0";
-      const title = document.createElement("span");
-      title.className = "text-sm font-semibold";
-      title.style.cssText =
-        "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-      title.textContent = it.fileName || it.title;
-      title.title = it.title;
-
-      const pct = it.size ? Math.floor((it.downloaded / it.size) * 100) : 0;
-      const parts = [];
-      if (it.watched) {
-        parts.push("Watched");
-      } else if (it.duration) {
-        parts.push(`${formatClock(it.position)} / ${formatClock(it.duration)}`);
-      }
-      if (pct >= 100) {
-        parts.push("Downloaded");
-      } else if (it.active) {
-        parts.push(`Downloading ${pct}%`);
-      } else {
-        parts.push(pct ? `${pct}% on disk` : "Not on disk");
-      }
-      const meta = document.createElement("span");
-      meta.className = "text-xs text-muted-foreground";
-      meta.textContent = parts.join(" · ");
-
-      const bar = document.createElement("div");
-      bar.className = "bg-muted rounded-full overflow-hidden";
-      bar.style.height = "4px";
-      const fill = document.createElement("div");
-      fill.className = "bg-primary";
-      fill.style.height = "100%";
-      fill.style.width =
-        (it.duration ? Math.min(100, (it.position / it.duration) * 100) : 0) +
-        "%";
-      bar.appendChild(fill);
-      info.append(title, meta, bar);
-
-      const playBtn = document.createElement("button");
-      playBtn.type = "button";
-      playBtn.className = "btn small shrink-0";
-      playBtn.textContent = it.watched ? "Watch again" : "Continue";
-      playBtn.addEventListener("click", () => {
-        document.querySelector("#magnet").value = it.magnet;
-        startPlayback({ fileIndex: it.fileIndex });
-      });
-
-      // two clicks to delete, no browser confirm() dialog
-      const delBtn = document.createElement("button");
-      delBtn.type = "button";
-      delBtn.className = "text-sm text-primary cursor-pointer shrink-0";
-      delBtn.textContent = "Delete";
-      let armed = null;
-      delBtn.addEventListener("click", async () => {
-        if (!armed) {
-          delBtn.textContent = "Sure?";
-          armed = setTimeout(() => {
-            armed = null;
-            delBtn.textContent = "Delete";
-          }, 3000);
-          return;
-        }
-        clearTimeout(armed);
-        const res = await fetch("/api/v1/library/delete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ infoHash: it.infoHash, fileIndex: it.fileIndex }),
-        }).catch(() => null);
-        butterup.toast({
-          message: res && res.ok ? "Deleted from disk" : "Could not delete",
-          location: "top-right",
-          icon: true,
-          dismissable: true,
-          type: res && res.ok ? "success" : "error",
-        });
-        renderLibrary();
-      });
-
-      row.append(info, playBtn, delBtn);
-      list.appendChild(row);
-    });
+    // series and loose files, most recent first
+    const shown = new Set(shows.map((s) => s.imdb));
+    const rows = [
+      ...shows.map((s) => ({
+        at: s.updatedAt,
+        el: () => buildShowRow(s, items.filter((it) => it.show === s.imdb)),
+      })),
+      ...items
+        .filter((it) => !shown.has(it.show))
+        .map((it) => ({ at: it.updatedAt, el: () => buildLibraryRow(it) })),
+    ].sort((a, b) => b.at - a.at);
+    rows.forEach((r) => list.appendChild(r.el()));
+    list.lastElementChild?.classList.remove("border-b");
   };
   renderLibrary();
 
@@ -1053,7 +1176,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     setupChosenPlayback(chosen);
     // fire and forget: playback must not wait for the subtitle search
     autoLoadSubtitles(sessionId, initialFile);
-    trackPlayback(sessionId, initialFile);
+    trackPlayback(sessionId, initialFile, opts.episode || null);
 
     document.querySelector("#video-player").style.display = "block";
 
@@ -1096,7 +1219,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
           player.src({ src: next.src, type: next.type });
           setupChosenPlayback(next);
           autoLoadSubtitles(sessionId, file);
-          trackPlayback(sessionId, file);
+          trackPlayback(sessionId, file, episodeFromFileName(file.name, opts.episode));
           player.play();
         });
         document.querySelector("#video-player").appendChild(videoSelect);
@@ -1495,11 +1618,19 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     );
   };
 
-  // Series view (server: series.go): seasons, episodes and an automatic
-  // torrent per episode, with the other candidates (episode torrents and
-  // season packs) one click away. startPlayback({episode}) picks the right
-  // file inside a pack.
-  const seriesView = { meta: null, info: null, season: null, torrents: {}, token: 0 };
+  // Series view (server: series.go, shows.go): seasons, episodes with their
+  // progress (✓ / bar) and an automatic torrent per episode, with the other
+  // candidates (episode torrents and season packs) one click away.
+  // startPlayback({episode}) picks the right file inside a pack and reports
+  // progress per episode.
+  const seriesView = {
+    meta: null,
+    info: null,
+    season: null,
+    focus: null, // {season, episode} to highlight
+    torrents: {},
+    token: 0,
+  };
 
   const pad2 = (n) => String(n).padStart(2, "0");
   const episodeCode = (s, e) => `S${pad2(s)}E${pad2(e)}`;
@@ -1525,6 +1656,14 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     return hits.sort((a, b) => (b.size || 0) - (a.size || 0))[0] || null;
   };
 
+  // episode of a file picked by hand from the video list of a pack
+  const episodeFromFileName = (name, base) => {
+    const m =
+      name.match(/(?:^|[^a-z0-9])s(\d{1,2})[ ._-]*e(\d{1,3})(?![0-9])/i) ||
+      name.match(/(?:^|[^0-9])(\d{1,2})x(\d{2,3})(?![0-9])/);
+    return base && m ? { ...base, season: +m[1], episode: +m[2] } : null;
+  };
+
   const searchManually = (query) => {
     document.querySelector("#search").value = query;
     document.querySelector("#search-category").value = "tv";
@@ -1532,17 +1671,81 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const markEpisodes = async (season, episode, watched) => {
+    const imdb = seriesView.meta?.imdb;
+    const res = await fetch(`/api/v1/series/${imdb}/mark`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ season, episode, watched }),
+    }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (!res || !res.ok) {
+      butterup.toast({
+        message: data.error || "Could not save",
+        location: "top-right",
+        icon: true,
+        dismissable: true,
+        type: "error",
+      });
+      return;
+    }
+    if (seriesView.meta?.imdb === imdb && seriesView.info) {
+      seriesView.info.progress = data.progress || {};
+      seriesView.info.next = data.next;
+      selectSeason(seriesView.season, { keepScroll: true });
+    }
+    renderLibrary();
+  };
+
+  // "Next: S02E06 · Name" under the season tabs
+  const renderNextLine = () => {
+    const line = document.querySelector("#series-next");
+    const next = seriesView.info?.next;
+    if (!line) {
+      return;
+    }
+    if (next) {
+      line.textContent = `${next.resume ? "Continue" : "Next"}: ${episodeCode(
+        next.season,
+        next.episode
+      )} · ${next.name}${next.aired ? "" : " (not aired yet)"}`;
+    } else {
+      const any = Object.values(seriesView.info?.progress || {}).some((p) => p.watched);
+      line.textContent = any ? "All caught up" : "";
+    }
+  };
+
+  // re-read progress (after an episode is watched) and redraw the season
+  const refreshSeriesProgress = async (imdb) => {
+    if (!seriesView.info || seriesView.meta?.imdb !== imdb) {
+      return;
+    }
+    const res = await fetch(`/api/v1/series/${imdb}`).catch(() => null);
+    const data = res && res.ok ? await res.json().catch(() => null) : null;
+    if (data && seriesView.meta?.imdb === imdb && seriesView.info) {
+      seriesView.info.progress = data.progress || {};
+      seriesView.info.next = data.next;
+      selectSeason(seriesView.season, { keepScroll: true });
+    }
+  };
+
   const buildEpisodeRow = (season, ep) => {
     const meta = seriesView.meta;
+    const progress = seriesView.info.progress?.[episodeCode(season, ep.episode)];
     const row = document.createElement("div");
     row.className = "flex gap-3 p-3 border-b";
+    row.dataset.episode = String(ep.episode);
     if (!ep.aired) {
       row.style.opacity = "0.6";
+    }
+    const focus = seriesView.focus;
+    if (focus && focus.season === season && focus.episode === ep.episode) {
+      row.style.boxShadow = "inset 4px 0 0 var(--primary)";
     }
 
     const thumb = document.createElement("div");
     thumb.className = "bg-muted rounded-md overflow-hidden shrink-0";
-    thumb.style.cssText = "width:128px;height:72px";
+    thumb.style.cssText = "width:128px;height:72px;position:relative";
     if (ep.thumbnail && ep.thumbnail.startsWith("https://")) {
       const img = document.createElement("img");
       img.src = ep.thumbnail;
@@ -1553,21 +1756,45 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       img.addEventListener("error", () => img.remove());
       thumb.appendChild(img);
     }
+    if (progress && !progress.watched && progress.duration > 0 && progress.position > 0) {
+      const bar = document.createElement("div");
+      bar.className = "bg-primary";
+      bar.style.cssText = `position:absolute;left:0;bottom:0;height:4px;width:${Math.min(
+        100,
+        (progress.position / progress.duration) * 100
+      )}%`;
+      thumb.appendChild(bar);
+    }
 
     const body = document.createElement("div");
     body.className = "flex flex-col flex-1 min-w-0";
     body.style.gap = "4px";
+    const titleLine = document.createElement("div");
+    titleLine.className = "flex items-center gap-2 min-w-0";
     const title = document.createElement("span");
     title.className = "text-sm font-semibold";
     title.style.cssText = ellipsis;
     title.textContent = `E${pad2(ep.episode)} · ${ep.name}`;
     title.title = ep.name;
+    titleLine.appendChild(title);
+    if (progress?.watched) {
+      const check = document.createElement("span");
+      check.className = "text-xs text-primary font-semibold shrink-0";
+      check.textContent = "✓ Watched";
+      titleLine.appendChild(check);
+    }
     const date = document.createElement("span");
     date.className = "text-xs text-muted-foreground";
-    date.textContent = [ep.released, ep.aired ? "" : "Not aired yet"]
+    date.textContent = [
+      ep.released,
+      ep.aired ? "" : "Not aired yet",
+      progress && !progress.watched && progress.position > 0 && progress.duration > 0
+        ? `${formatClock(progress.position)} / ${formatClock(progress.duration)}`
+        : "",
+    ]
       .filter(Boolean)
       .join(" · ");
-    body.append(title, date);
+    body.append(titleLine, date);
     if (ep.overview) {
       const overview = document.createElement("span");
       overview.className = "text-xs text-muted-foreground";
@@ -1600,19 +1827,31 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     row.append(thumb, body);
 
     const episodeOpts = {
-      episode: { imdb: meta.imdb, title: meta.title, season, episode: ep.episode },
+      episode: {
+        imdb: meta.imdb,
+        title: meta.title,
+        poster: meta.poster || "",
+        season,
+        episode: ep.episode,
+      },
     };
-    const searchLink = (label) => {
+    const textButton = (label, onClick) => {
       const a = document.createElement("button");
       a.type = "button";
       a.className = "text-xs text-primary cursor-pointer";
       a.style.alignSelf = "flex-start";
       a.textContent = label;
-      a.addEventListener("click", () =>
-        searchManually(`${meta.title} ${episodeCode(season, ep.episode)}`)
-      );
+      a.addEventListener("click", onClick);
       return a;
     };
+    const searchLink = (label) =>
+      textButton(label, () =>
+        searchManually(`${meta.title} ${episodeCode(season, ep.episode)}`)
+      );
+    const markLink = () =>
+      textButton(progress?.watched ? "Mark unwatched" : "Mark watched", () =>
+        markEpisodes(season, ep.episode, !progress?.watched)
+      );
 
     const setTorrents = (list) => {
       const key = String(ep.episode);
@@ -1624,11 +1863,12 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       if (!best) {
         watch.remove(); // keeps startPlayback from re-enabling it
         note.textContent = list ? "No torrents found" : "Torrents unavailable";
-        actions.appendChild(searchLink("Search"));
+        actions.append(searchLink("Search"), markLink());
         return;
       }
       watch.classList.add("play-torrent"); // reset by startPlayback
       watch.removeAttribute("disabled");
+      watch.textContent = progress?.watched ? "Watch again" : "Watch";
       watch.addEventListener("click", () =>
         playFromButton(
           watch,
@@ -1645,11 +1885,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         .join(" · ");
       note.title = best.torrent.title;
 
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "text-xs text-primary cursor-pointer";
-      toggle.textContent = "Other torrents";
-      toggle.addEventListener("click", () => {
+      const toggle = textButton("Other torrents", () => {
         if (others.childElementCount === 0) {
           const section = (label, results) => {
             const h = document.createElement("span");
@@ -1663,13 +1899,13 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         }
         others.classList.toggle("hidden");
       });
-      actions.appendChild(toggle);
+      actions.append(toggle, markLink());
     };
 
     return { el: row, setTorrents };
   };
 
-  const selectSeason = async (n) => {
+  const selectSeason = async (n, opts = {}) => {
     const token = seriesView.token;
     seriesView.season = n;
     document.querySelectorAll(".series-season").forEach((b) => {
@@ -1680,11 +1916,31 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     });
     const list = document.querySelector("#series-episodes");
     const status = document.querySelector("#series-status");
+    const scroll = list.scrollTop;
+    renderNextLine();
     list.innerHTML = "";
     const season = seriesView.info.seasons.find((s) => s.season === n);
     const rows = (season?.episodes || []).map((ep) => buildEpisodeRow(n, ep));
     rows.forEach((r) => list.appendChild(r.el));
     list.lastElementChild?.classList.remove("border-b");
+
+    const markSeason = document.querySelector("#series-mark-season");
+    const allWatched = (season?.episodes || []).every(
+      (ep) => seriesView.info.progress?.[episodeCode(n, ep.episode)]?.watched
+    );
+    markSeason.textContent = allWatched ? "Mark season unwatched" : "Mark season watched";
+    markSeason.onclick = () => markEpisodes(n, 0, !allWatched);
+
+    if (opts.keepScroll) {
+      list.scrollTop = scroll;
+    } else {
+      const focus = seriesView.focus;
+      const target =
+        focus && focus.season === n
+          ? list.querySelector(`[data-episode="${focus.episode}"]`)
+          : null;
+      list.scrollTop = target ? target.offsetTop : 0; // list is position:relative
+    }
 
     let torrents = seriesView.torrents[n];
     if (!torrents) {
@@ -1721,12 +1977,14 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
   const closeSeries = () => {
     seriesView.token++;
+    seriesView.info = null;
     document.querySelector("#series-view").classList.add("hidden");
   };
 
-  const openSeries = async (meta) => {
+  // focus = {season, episode} to open at; default: the next episode to watch
+  const openSeries = async (meta, focus = null) => {
     const token = ++seriesView.token;
-    Object.assign(seriesView, { meta, info: null, season: null, torrents: {} });
+    Object.assign(seriesView, { meta, info: null, season: null, focus, torrents: {} });
     const view = document.querySelector("#series-view");
     view.innerHTML = "";
 
@@ -1741,20 +1999,33 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     head.className = "flex gap-3";
     const headBody = document.createElement("div");
     headBody.className = "flex flex-col gap-2 flex-1 min-w-0";
+    let header = buildMetaHeader(meta, { episodes: false });
     const seasons = document.createElement("div");
     seasons.className = "flex items-center gap-2";
     seasons.style.flexWrap = "wrap";
+    const nextLine = document.createElement("span");
+    nextLine.id = "series-next";
+    nextLine.className = "text-sm";
+    const statusLine = document.createElement("div");
+    statusLine.className = "flex items-center gap-3";
+    statusLine.style.flexWrap = "wrap";
     const status = document.createElement("p");
     status.id = "series-status";
     status.className = "text-sm text-muted-foreground";
     status.textContent = "Loading episodes…";
-    headBody.append(buildMetaHeader(meta, { episodes: false }), seasons, status);
-    head.append(buildPoster(meta, 100, 148), headBody);
+    const markSeason = document.createElement("button");
+    markSeason.type = "button";
+    markSeason.id = "series-mark-season";
+    markSeason.className = "text-xs text-primary cursor-pointer";
+    statusLine.append(markSeason, status);
+    headBody.append(header, seasons, nextLine, statusLine);
+    let poster = buildPoster(meta, 100, 148);
+    head.append(poster, headBody);
 
     const list = document.createElement("div");
     list.id = "series-episodes";
     list.className = "flex flex-col border rounded-lg";
-    list.style.cssText = "max-height:70vh;overflow:auto";
+    list.style.cssText = "max-height:70vh;overflow:auto;position:relative";
 
     view.append(close, head, list);
     view.classList.remove("hidden");
@@ -1777,10 +2048,27 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       return;
     }
 
+    // Continue watching only knows title and poster: use the full metadata
+    if (seriesView.info.meta) {
+      seriesView.meta = { ...meta, ...seriesView.info.meta };
+      const fullHeader = buildMetaHeader(seriesView.meta, { episodes: false });
+      header.replaceWith(fullHeader);
+      header = fullHeader;
+      if (!meta.poster && seriesView.meta.poster) {
+        const p = buildPoster(seriesView.meta, 100, 148);
+        poster.replaceWith(p);
+        poster = p;
+      }
+    }
+
     const all = seriesView.info.seasons || [];
     if (!all.length) {
       status.textContent = "No episodes listed for this series";
       return;
+    }
+    const next = seriesView.info.next;
+    if (!seriesView.focus && next) {
+      seriesView.focus = { season: next.season, episode: next.episode };
     }
     all.forEach((s) => {
       const b = document.createElement("button");
@@ -1792,8 +2080,12 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       b.addEventListener("click", () => selectSeason(s.season));
       seasons.appendChild(b);
     });
-    // Phase 3 will open the season of the next episode to watch
-    selectSeason((all.find((s) => s.season > 0) || all[0]).season);
+    const focusSeason = seriesView.focus?.season;
+    const start =
+      all.find((s) => s.season === focusSeason) ||
+      all.find((s) => s.season > 0) ||
+      all[0];
+    selectSeason(start.season);
   };
 
   // Featured titles (server: featured.go) and streaming catalogs (server:
