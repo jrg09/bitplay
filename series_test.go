@@ -66,11 +66,14 @@ func TestRankSeriesResults(t *testing.T) {
 		{Title: "Show S01E01 1080p Dual", Seeders: 1}, // too few seeders
 		{Title: "Show S01E01 2160p", Seeders: 900},
 		{Title: "Show S01E01 1080p", Seeders: 80},
+		{Title: "Show S01E01 1080p x265 LATINO", Seeders: 999},
+		{Title: "Show.S01E01.1080p.HEVC", Seeders: 998},
 	}
 	rankSeriesResults(list)
 	want := []string{
 		"Show S01E01 1080p LATINO", "Show S01E01 1080p", "Show S01E01 1080p",
-		"Show S01E01 720p", "Show S01E01 2160p", "Show S01E01 1080p Dual",
+		"Show S01E01 720p", "Show S01E01 2160p",
+		"Show S01E01 1080p x265 LATINO", "Show.S01E01.1080p.HEVC", "Show S01E01 1080p Dual",
 	}
 	for i, w := range want {
 		if list[i].Title != w {

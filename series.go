@@ -13,8 +13,8 @@ package main
 //            "S01-S05"); "imdb" is usually set.
 //
 // Ranking follows Jorge's choices (SERIES_PLAN.md): torrents with enough
-// seeders first, then Latino/Dual/Spanish audio, then 1080p > 720p > 2160p,
-// then seeders. A single episode is preferred over a season pack.
+// seeders first, then formats the browser can play (no HEVC/x265), then
+// Latino/Dual/Spanish audio, then 1080p > 720p > 2160p, then seeders. A single episode is preferred over a season pack.
 
 import (
 	"context"
@@ -208,6 +208,9 @@ var (
 	reQuality1080   = regexp.MustCompile(`(?i)\b1080p\b`)
 	reQuality720    = regexp.MustCompile(`(?i)\b720p\b`)
 	reQuality2160   = regexp.MustCompile(`(?i)\b(2160p|4k|uhd)\b`)
+	// browsers can't decode HEVC (10-bit even less): such torrents only
+	// play in an external player
+	reHEVC = regexp.MustCompile(`(?i)\b(x265|h265|h 265|hevc|10bit|10 bit)\b`)
 )
 
 // seriesRelease is what a torrent name says it holds.
@@ -311,6 +314,9 @@ func rankSeriesResults(list []searchResult) {
 		a, b := list[i], list[j]
 		if viable(a) != viable(b) {
 			return viable(a)
+		}
+		if ha, hb := reHEVC.MatchString(normalizeText(a.Title)), reHEVC.MatchString(normalizeText(b.Title)); ha != hb {
+			return hb
 		}
 		if la, lb := reLatinoAudio.MatchString(normalizeText(a.Title)), reLatinoAudio.MatchString(normalizeText(b.Title)); la != lb {
 			return la
