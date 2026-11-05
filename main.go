@@ -1203,17 +1203,28 @@ func handleRemux(w http.ResponseWriter, r *http.Request, session *TorrentSession
 	atomic.AddInt32(&session.ActiveStreams, 1)
 	defer atomic.AddInt32(&session.ActiveStreams, -1)
 
-	videoCodec := ""
+	videoCodec, audioCodec := "", ""
 	session.ProbeMu.Lock()
 	if probe := session.ProbeCache[fileIndex]; probe != nil {
 		for _, s := range probe.Streams {
-			if s.Type == "video" {
+			if s.Type == "video" && videoCodec == "" {
 				videoCodec = s.Codec
-				break
+			}
+			if s.Type == "audio" && (s.Index == audioStream || (audioStream < 0 && audioCodec == "")) {
+				audioCodec = s.Codec
 			}
 		}
 	}
 	session.ProbeMu.Unlock()
+	// browsers can't play AC3/EAC3/DTS/TrueHD, and the MP4 muxer can't even
+	// copy EAC3 into a fragmented stream ("Cannot write moov atom before
+	// EAC3 packets parsed"): transcode only the audio, to stereo AAC
+	audioArgs := []string{"-c:a", "copy"}
+	switch audioCodec {
+	case "", "aac", "mp3", "opus", "flac", "vorbis":
+	default:
+		audioArgs = []string{"-c:a", "aac", "-b:a", "192k", "-ac", "2"}
+	}
 
 	args := []string{"-v", "error"}
 	if loopbackAuthHeader != "" {
@@ -1228,7 +1239,9 @@ func handleRemux(w http.ResponseWriter, r *http.Request, session *TorrentSession
 	} else {
 		args = append(args, "-map", "0:a:0?")
 	}
-	args = append(args, "-c", "copy", "-sn")
+	args = append(args, "-c:v", "copy")
+	args = append(args, audioArgs...)
+	args = append(args, "-sn")
 	if videoCodec == "hevc" {
 		args = append(args, "-tag:v", "hvc1") // Safari rejects the default hev1 tag
 	}
