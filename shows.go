@@ -15,7 +15,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -410,4 +412,81 @@ func libraryShowHideHandler(w http.ResponseWriter, r *http.Request) {
 	sp.Hidden = true
 	librarySaveLocked()
 	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Hidden"})
+}
+
+// libraryPrefetchHandler: POST /api/v1/library/prefetch {session, file, series}
+// Downloads a file in the background without playing it (the next episode,
+// pre-fetched near the end of the current one). The file gets a library
+// entry, so the janitor cleans it up once watched, and is linked to its
+// episode without changing the show's last/next episode.
+func libraryPrefetchHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct {
+		Session string     `json:"session"`
+		File    int        `json:"file"`
+		Series  *seriesRef `json:"series"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		respondWithJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+		return
+	}
+	v, ok := sessions.Load(in.Session)
+	if !ok {
+		respondWithJSON(w, http.StatusNotFound, map[string]string{"error": "Session not found"})
+		return
+	}
+	session := v.(*TorrentSession)
+	t := session.Torrent
+	if t == nil || t.Info() == nil {
+		respondWithJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Torrent metadata not available yet"})
+		return
+	}
+	files := t.Files()
+	if in.File < 0 || in.File >= len(files) {
+		respondWithJSON(w, http.StatusBadRequest, map[string]string{"error": "File index out of range"})
+		return
+	}
+	session.LastUsed = time.Now()
+	file := files[in.File]
+	hash := t.InfoHash().HexString()
+	key := libraryKey(hash, in.File)
+	done := file.BytesCompleted()
+	now := time.Now().Unix()
+
+	library.Lock()
+	lib := libraryLocked()
+	e := lib.Entries[key]
+	if e == nil {
+		e = &libraryEntry{InfoHash: hash, FileIndex: in.File, UpdatedAt: now}
+		lib.Entries[key] = e
+	}
+	e.Title = t.Name()
+	e.FileName = filepath.Base(file.DisplayPath())
+	e.RelPath = libraryFilePath(t.Info(), file)
+	e.Size = file.Length()
+	e.Downloaded = done
+	if in.Series.valid() {
+		sp := showLocked(lib, in.Series.IMDb)
+		if sp.Title == "" {
+			sp.Title = in.Series.Title
+		}
+		k := episodeKey(in.Series.Season, in.Series.Episode)
+		ep := sp.Episodes[k]
+		if ep == nil {
+			ep = &episodeProgress{UpdatedAt: now}
+			sp.Episodes[k] = ep
+		}
+		ep.InfoHash, ep.FileIndex = hash, in.File
+	}
+	librarySaveLocked()
+	library.Unlock()
+
+	if done < file.Length() {
+		libraryStartFullDownload(hash, in.File, session, file)
+	}
+	log.Printf("Library: prefetching %q", file.DisplayPath())
+	respondWithJSON(w, http.StatusOK, map[string]interface{}{"downloaded": done, "size": file.Length(), "complete": done >= file.Length()})
 }

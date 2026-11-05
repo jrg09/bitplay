@@ -794,9 +794,11 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     wrap.className = "flex flex-col border-b";
     const row = document.createElement("div");
     row.className = "flex items-center gap-3 p-3";
+    row.style.flexWrap = "wrap"; // buttons drop below on phones
 
     const info = document.createElement("div");
     info.className = "flex flex-col gap-1 flex-1 min-w-0";
+    info.style.flexBasis = "180px";
     const title = document.createElement("span");
     title.className = "text-sm font-semibold";
     title.style.cssText = ellipsis;
@@ -951,6 +953,9 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       });
       return;
     }
+
+    nextEpisodeToken++;
+    document.querySelector("#next-episode")?.remove();
 
     // clean up previous player
     if (player) {
@@ -1177,6 +1182,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     // fire and forget: playback must not wait for the subtitle search
     autoLoadSubtitles(sessionId, initialFile);
     trackPlayback(sessionId, initialFile, opts.episode || null);
+    setupNextEpisode({ sessionId, magnet, videoFiles, episode: opts.episode || null });
 
     document.querySelector("#video-player").style.display = "block";
 
@@ -1219,7 +1225,9 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
           player.src({ src: next.src, type: next.type });
           setupChosenPlayback(next);
           autoLoadSubtitles(sessionId, file);
-          trackPlayback(sessionId, file, episodeFromFileName(file.name, opts.episode));
+          const picked = episodeFromFileName(file.name, opts.episode);
+          trackPlayback(sessionId, file, picked);
+          setupNextEpisode({ sessionId, magnet, videoFiles, episode: picked });
           player.play();
         });
         document.querySelector("#video-player").appendChild(videoSelect);
@@ -1729,6 +1737,204 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     }
   };
 
+  // Next episode: an "Up next" bar near the end of an episode (no autoplay),
+  // playing from the same pack when it holds the next file, and a
+  // background download of that episode from 80% on.
+  const seriesInfoCache = {};
+  const loadSeriesInfo = async (imdb) => {
+    if (seriesView.info && seriesView.meta?.imdb === imdb) {
+      return seriesView.info;
+    }
+    if (!seriesInfoCache[imdb]) {
+      seriesInfoCache[imdb] = fetch(`/api/v1/series/${imdb}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+    }
+    const info = await seriesInfoCache[imdb];
+    if (!info) {
+      delete seriesInfoCache[imdb];
+    }
+    return info;
+  };
+
+  // the episode right after (season, episode); specials only lead to specials
+  const followingEpisode = (info, season, episode) => {
+    const order = [];
+    (info?.seasons || []).forEach((s) =>
+      (s.episodes || []).forEach((ep) => order.push({ ...ep, season: s.season }))
+    );
+    order.sort((a, b) =>
+      (a.season === 0) !== (b.season === 0)
+        ? a.season === 0
+          ? 1
+          : -1
+        : a.season - b.season || a.episode - b.episode
+    );
+    const i = order.findIndex((x) => x.season === season && x.episode === episode);
+    const next = i >= 0 ? order[i + 1] : null;
+    if (!next || (next.season === 0 && season !== 0)) {
+      return null;
+    }
+    return next;
+  };
+
+  // where the next episode plays from: the current pack when it has that
+  // file, otherwise the series' automatic pick
+  const nextEpisodeSource = async (ctx, next) => {
+    if (ctx.videoFiles.length > 1) {
+      const f = findEpisodeFile(ctx.videoFiles, next.season, next.episode);
+      if (f) {
+        return { magnet: ctx.magnet, sessionId: ctx.sessionId, fileIndex: f.index };
+      }
+    }
+    const res = await fetch(
+      `/api/v1/series/${ctx.episode.imdb}/torrents?season=${next.season}&episode=${next.episode}`
+    );
+    const data = res.ok ? await res.json() : null;
+    const best =
+      data?.best?.[String(next.episode)] ||
+      (data?.packs?.[0] ? { torrent: data.packs[0] } : null);
+    if (!best) {
+      return null;
+    }
+    return { magnet: best.torrent.downloadUrl || best.torrent.magnetUrl || "" };
+  };
+
+  const prefetchEpisode = async (src, ref) => {
+    if (!src.sessionId) {
+      const add = await fetch("/api/v1/torrent/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ magnet: src.magnet }),
+      });
+      if (!add.ok) {
+        return;
+      }
+      const { sessionId } = await add.json();
+      const files = await fetch(`/api/v1/torrent/${sessionId}`).then((r) =>
+        r.ok ? r.json() : []
+      );
+      const videos = (files || []).filter((f) => /\.(mp4|mkv|webm|avi)$/i.test(f.name));
+      const f = findEpisodeFile(videos, ref.season, ref.episode);
+      if (!f) {
+        return;
+      }
+      src.sessionId = sessionId;
+      src.fileIndex = f.index;
+    }
+    await fetch("/api/v1/library/prefetch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session: src.sessionId, file: src.fileIndex, series: ref }),
+    });
+  };
+
+  let nextEpisodeToken = 0;
+  // ctx = {sessionId, magnet, videoFiles, episode} of what is playing now
+  const setupNextEpisode = async (ctx) => {
+    const token = ++nextEpisodeToken;
+    document.querySelector("#next-episode")?.remove();
+    const cur = ctx.episode;
+    const currentPlayer = player;
+    if (!cur || !currentPlayer) {
+      return;
+    }
+    const info = await loadSeriesInfo(cur.imdb);
+    const next = followingEpisode(info, cur.season, cur.episode);
+    if (!next || token !== nextEpisodeToken || player !== currentPlayer) {
+      return;
+    }
+    const ref = {
+      imdb: cur.imdb,
+      title: cur.title,
+      poster: cur.poster || "",
+      season: next.season,
+      episode: next.episode,
+    };
+    let source = null;
+    const getSource = () => {
+      if (!source) {
+        source = nextEpisodeSource(ctx, next).catch(() => null);
+      }
+      return source;
+    };
+
+    let prefetched = false;
+    let shown = false;
+    const showBar = () => {
+      if (shown || token !== nextEpisodeToken) {
+        return;
+      }
+      shown = true;
+      const bar = document.createElement("div");
+      bar.id = "next-episode";
+      bar.className = "w-full flex items-center gap-3 p-3 border rounded-lg mt-4";
+      const text = document.createElement("span");
+      text.className = "text-sm flex-1 min-w-0";
+      text.style.cssText = ellipsis;
+      text.textContent = `Up next: ${episodeCode(next.season, next.episode)} · ${next.name}`;
+      bar.appendChild(text);
+      if (!next.aired) {
+        text.textContent += next.released ? ` (airs ${next.released})` : " (not aired yet)";
+      } else {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn small shrink-0";
+        btn.textContent = "Play next";
+        btn.addEventListener("click", async () => {
+          btn.setAttribute("disabled", "disabled");
+          btn.textContent = "Loading…";
+          const src = await getSource();
+          if (!src || !src.magnet) {
+            butterup.toast({
+              message: `No torrent found for ${episodeCode(next.season, next.episode)}`,
+              location: "top-right",
+              icon: true,
+              dismissable: true,
+              type: "error",
+            });
+            btn.removeAttribute("disabled");
+            btn.textContent = "Play next";
+            return;
+          }
+          document.querySelector("#magnet").value = src.magnet;
+          startPlayback({ fileIndex: src.fileIndex, episode: ref });
+        });
+        bar.appendChild(btn);
+      }
+      document.querySelector("main").appendChild(bar);
+    };
+
+    const onTime = () => {
+      if (token !== nextEpisodeToken || player !== currentPlayer) {
+        currentPlayer.off("timeupdate", onTime);
+        return;
+      }
+      let t = 0;
+      let d = 0;
+      try {
+        t = currentPlayer.currentTime();
+        d = currentPlayer.duration();
+      } catch (err) {
+        return; // disposed
+      }
+      if (!Number.isFinite(d) || d <= 0) {
+        return;
+      }
+      if (!prefetched && next.aired && t / d >= 0.8) {
+        prefetched = true;
+        getSource()
+          .then((src) => src && src.magnet && prefetchEpisode(src, ref))
+          .catch(() => {});
+      }
+      if (t / d >= 0.9) {
+        showBar();
+      }
+    };
+    currentPlayer.on("timeupdate", onTime);
+    currentPlayer.one("ended", showBar);
+  };
+
   const buildEpisodeRow = (season, ep) => {
     const meta = seriesView.meta;
     const progress = seriesView.info.progress?.[episodeCode(season, ep.episode)];
@@ -1744,7 +1950,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     }
 
     const thumb = document.createElement("div");
-    thumb.className = "bg-muted rounded-md overflow-hidden shrink-0";
+    thumb.className = "ep-thumb bg-muted rounded-md overflow-hidden shrink-0";
     thumb.style.cssText = "width:128px;height:72px;position:relative";
     if (ep.thumbnail && ep.thumbnail.startsWith("https://")) {
       const img = document.createElement("img");
@@ -2020,6 +2226,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     statusLine.append(markSeason, status);
     headBody.append(header, seasons, nextLine, statusLine);
     let poster = buildPoster(meta, 100, 148);
+    poster.classList.add("series-poster");
     head.append(poster, headBody);
 
     const list = document.createElement("div");
@@ -2056,6 +2263,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       header = fullHeader;
       if (!meta.poster && seriesView.meta.poster) {
         const p = buildPoster(seriesView.meta, 100, 148);
+        p.classList.add("series-poster");
         poster.replaceWith(p);
         poster = p;
       }

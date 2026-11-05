@@ -48,6 +48,19 @@
           -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000,
           0 0 6px #000 !important;
       }
+          /* series view on phones (index.js openSeries) */
+      @media (max-width: 520px) {
+        #series-view .series-poster {
+          display: none;
+        }
+        #series-episodes .ep-thumb {
+          width: 88px !important;
+          height: 50px !important;
+        }
+        #series-episodes > div {
+          padding: 10px;
+        }
+      }
     </style>
   </head>
 
