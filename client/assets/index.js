@@ -1719,20 +1719,54 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     const list = document.createElement("div");
     list.className = "flex flex-col gap-2";
     let expanded = false;
-    const refreshBadges = () =>
-      list.querySelectorAll("[data-release]").forEach(applySubsBadge);
-    if (subsMeta && "IntersectionObserver" in window) {
-      // look subtitles up only for lists the user can actually see
-      const observer = new IntersectionObserver((entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          observer.disconnect();
-          loadSubsAvailability(subsMeta, results).then(refreshBadges);
+    // Subtitles are only looked up when the user asks for this title, so
+    // browsing results doesn't spend OpenSubtitles requests
+    const subsControl = () => {
+      const canCheck =
+        subsMeta &&
+        settings?.enableSubtitles &&
+        settings?.openSubtitlesApiKeySet &&
+        /^tt\d+$/.test(subsMeta.imdb || "");
+      if (!canCheck) {
+        return null;
+      }
+      if (results.some((r) => subsLevels.has(r.title))) {
+        const found = results.some((r) => {
+          const v = subsLevels.get(r.title);
+          return v && v.level !== "none";
+        });
+        if (found) {
+          return null; // the badges say it all
+        }
+        const none = document.createElement("span");
+        none.className = "text-xs text-muted-foreground";
+        none.textContent = "No Spanish subtitles found for this title";
+        return none;
+      }
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "text-xs text-primary cursor-pointer";
+      btn.style.alignSelf = "flex-start";
+      btn.textContent = "Check Spanish subtitles";
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        btn.textContent = "Checking…";
+        await loadSubsAvailability(subsMeta, results);
+        if (results.some((r) => subsLevels.has(r.title))) {
+          renderRows();
+        } else {
+          btn.disabled = false;
+          btn.textContent = "Couldn't check - try again";
         }
       });
-      observer.observe(list);
-    }
+      return btn;
+    };
     const renderRows = () => {
       list.innerHTML = "";
+      const control = subsControl();
+      if (control) {
+        list.appendChild(control);
+      }
       const shown = expanded ? results : results.slice(0, shownByDefault);
       shown.forEach((r) => list.appendChild(buildTorrentRow(r, opts)));
       if (results.length > shownByDefault) {
@@ -1748,10 +1782,6 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
           renderRows();
         });
         list.appendChild(more);
-      }
-      if (subsMeta) {
-        // rows revealed by "Show more" weren't covered by the first lookup
-        loadSubsAvailability(subsMeta, shown).then(refreshBadges);
       }
     };
     renderRows();
