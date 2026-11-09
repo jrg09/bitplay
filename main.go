@@ -582,6 +582,7 @@ func main() {
 	http.HandleFunc("/api/v1/search", torrentSearchHandler)
 	http.HandleFunc("/api/v1/featured", featuredHandler)
 	http.HandleFunc("/api/v1/overview", overviewHandler)
+	http.HandleFunc("/api/v1/trailer", trailerHandler)
 	http.HandleFunc("/api/v1/catalog", streamingCatalogHandler)
 	http.HandleFunc("/api/v1/series/", seriesHandler)
 	http.HandleFunc("/api/v1/settings/search", requireAdmin(savePublicSearchSettingsHandler))

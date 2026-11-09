@@ -1795,6 +1795,63 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     return overviewCache.get(key);
   };
 
+  // Trailer (server: trailer.go finds the YouTube video): a modal that dims
+  // the page and plays it. Removing the iframe on close stops the video.
+  const trailerModal = document.querySelector("#trailer-modal");
+  let trailerToken = 0;
+  const closeTrailer = () => {
+    trailerToken++;
+    trailerModal.classList.add("hidden");
+    document.querySelector("#trailer-frame").innerHTML = "";
+    document.querySelector("#trailer-note").textContent = "";
+  };
+  const openTrailer = async (meta) => {
+    const token = ++trailerToken;
+    const frame = document.querySelector("#trailer-frame");
+    const note = document.querySelector("#trailer-note");
+    frame.innerHTML = "";
+    note.textContent = "Looking for the trailer…";
+    trailerModal.classList.remove("hidden");
+
+    let data = null;
+    try {
+      const type = meta.type === "series" ? "series" : "movie";
+      const res = await fetch(
+        `/api/v1/trailer?imdb=${encodeURIComponent(meta.imdb)}&type=${type}`
+      );
+      data = res.ok ? await res.json() : null;
+    } catch (err) {
+      data = null;
+    }
+    if (token !== trailerToken) {
+      return; // closed while searching
+    }
+    const id = data?.youtubeId || "";
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) {
+      const year = (meta.year || "").slice(0, 4);
+      const link = document.createElement("a");
+      link.href = `https://www.youtube.com/results?search_query=${encodeURIComponent(
+        `${meta.title} ${year} trailer`.replace(/\s+/g, " ")
+      )}`;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Search on YouTube";
+      note.textContent = "No trailer found for this title. ";
+      note.appendChild(link);
+      return;
+    }
+    note.textContent = "";
+    const iframe = document.createElement("iframe");
+    iframe.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&playsinline=1&modestbranding=1`;
+    iframe.title = `${meta.title || "Title"} trailer`;
+    iframe.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+    iframe.allowFullscreen = true;
+    iframe.referrerPolicy = "strict-origin-when-cross-origin";
+    frame.appendChild(iframe);
+  };
+  document.querySelector("#trailer-close").addEventListener("click", closeTrailer);
+  document.querySelector(".bp-trailer-shade").addEventListener("click", closeTrailer);
+
   // title, year, rating, type, IMDb link, genres and synopsis of a title;
   // series get an "Episodes" button unless opts.episodes === false
   const buildMetaHeader = (meta, opts = {}) => {
@@ -1825,6 +1882,12 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         link.rel = "noopener noreferrer";
         link.textContent = `IMDb ${meta.imdb}`;
         header.appendChild(link);
+        const trailer = document.createElement("button");
+        trailer.type = "button";
+        trailer.className = "btn small shrink-0";
+        trailer.textContent = "▶ Trailer";
+        trailer.addEventListener("click", () => openTrailer(meta));
+        header.appendChild(trailer);
         if (meta.type === "series" && opts.episodes !== false) {
           const eps = document.createElement("button");
           eps.type = "button";
@@ -2897,7 +2960,9 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     if (e.key !== "Escape" || !document.querySelector("#settings-model").classList.contains("hidden")) {
       return;
     }
-    if (!playerOverlay.classList.contains("hidden")) {
+    if (!trailerModal.classList.contains("hidden")) {
+      closeTrailer();
+    } else if (!playerOverlay.classList.contains("hidden")) {
       closePlayerOverlay();
     } else if (sheetOpen()) {
       closeSheets();

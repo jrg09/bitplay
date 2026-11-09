@@ -532,3 +532,73 @@ body.bp-searching #greeting {
   display: block;
   -webkit-line-clamp: unset;
 }
+
+/* trailer: dims everything, above the sheets and below the player */
+#trailer-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 56px 16px 16px;
+}
+#trailer-modal.hidden {
+  display: none;
+}
+.bp-trailer-shade {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.9);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.bp-trailer-box {
+  position: relative;
+  width: min(1000px, 100%);
+}
+.bp-trailer-frame {
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+}
+.bp-trailer-frame:empty {
+  display: none;
+}
+.bp-trailer-frame iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.bp-trailer-x {
+  position: absolute;
+  top: -44px;
+  right: 0;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 1.75rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.bp-trailer-x:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+.bp-trailer-note {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+.bp-trailer-note:empty {
+  display: none;
+}
+.bp-trailer-note a {
+  color: var(--primary);
+  text-decoration: underline;
+}

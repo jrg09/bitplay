@@ -143,6 +143,16 @@
 
     <div id="bp-backdrop" class="hidden"></div>
 
+    <!-- trailer: dims the page and plays the title's YouTube trailer -->
+    <div id="trailer-modal" class="hidden" role="dialog" aria-modal="true" aria-label="Trailer">
+      <div class="bp-trailer-shade"></div>
+      <div class="bp-trailer-box">
+        <button type="button" id="trailer-close" class="bp-trailer-x" aria-label="Close trailer">&times;</button>
+        <div id="trailer-frame" class="bp-trailer-frame"></div>
+        <p id="trailer-note" class="bp-trailer-note"></p>
+      </div>
+    </div>
+
     <!-- title details: poster, rating and torrents (index.js showFeaturedDetail) -->
     <div id="featured-detail" class="hidden bp-sheet"></div>
     <!-- seasons and episodes (series.go, index.js openSeries) -->
