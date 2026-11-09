@@ -1840,7 +1840,15 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       note.appendChild(link);
       return;
     }
+    // if the embed doesn't render (some browsers or networks block it), the
+    // video is one tap away
+    const watch = document.createElement("a");
+    watch.href = `https://www.youtube.com/watch?v=${id}`;
+    watch.target = "_blank";
+    watch.rel = "noopener noreferrer";
+    watch.textContent = "Not playing? Open on YouTube";
     note.textContent = "";
+    note.appendChild(watch);
     const iframe = document.createElement("iframe");
     // no autoplay: the viewer presses play
     iframe.src = `https://www.youtube-nocookie.com/embed/${id}?rel=0&playsinline=1&modestbranding=1`;
