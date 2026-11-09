@@ -11,6 +11,7 @@ BitPlay is a web application built with Go that allows you to stream video conte
 *   **Streaming-style UI:** a sticky top bar with search, a home page of poster rows (continue watching, popular, recently added, top lists and one row per streaming service), a poster grid for search results, details in a sheet over the page and a full screen player. Works on phones.
 *   **Synopsis:** opening a title shows a short synopsis (three lines, click for the rest). In Spanish (or any language) from TMDB when you set `BITPLAY_TMDB_API_KEY`; otherwise in English from Cinemeta, with no setup. See [Synopsis language](#synopsis-language).
 *   **Trailers:** a Trailer button on every title opens a modal that dims the page and plays its YouTube trailer, found automatically (TMDB in your language first, then English or any other, with Cinemeta as a fallback; videos that can't be embedded are skipped). Without a TMDB key only Cinemeta's trailer is used.
+*   **Cast to a TV:** AirPlay from Safari and Chromecast from Chrome, with subtitles. See [Casting](#casting-airplay-and-chromecast).
 *   **Safari & iOS Playback:** iPhone, iPad and Safari can't play the progressive MP4 used for MKV remuxing, so BitPlay detects WebKit browsers and serves the video as on-demand HLS instead, re-encoding on the fly to H.264 + AAC. Seeking works natively. See [Safari and iOS playback](#safari-and-ios-playback).
 *   **Web-Based UI:** Access and control BitPlay through a user-friendly web interface.
 *   **Proxy Support:** Configure a SOCKS5 proxy for all torrent-related traffic (fetching metadata, peer connections). (Note: HTTP proxies are not currently supported).
@@ -190,6 +191,23 @@ If BitPlay is published through a Cloudflare Tunnel protected by Cloudflare Acce
 
 Without `BITPLAY_CF_TEAM_DOMAIN` the app stays single-user, as before.
 
+### Casting (AirPlay and Chromecast)
+
+While a video plays, a button in the player bar sends it to the TV, with its subtitles:
+
+*   **AirPlay** (Safari on iPhone, iPad and Mac): the **AirPlay** button opens the system picker. The video switches to a signed HLS link whose playlist carries the subtitles (Spanish on by default), so the Apple TV shows them and you can pick another one from the TV.
+*   **Chromecast** (Chrome and Chromium on desktop and Android; Safari can't): the **Cast** button connects to a device, sends the video and side-loads the subtitles. A small remote appears under the player (play/pause, ±10 s, subtitle track, stop). Chrome downloads Google's sender library from `gstatic.com` the first time a video plays.
+*   **Which subtitles:** every one loaded for the video (OpenSubtitles in your languages, then the `.srt`/`.vtt` files inside the torrent). A file you upload by hand can't be sent.
+*   **Video:** always the server's HLS (H.264 + AAC, re-encoded by ffmpeg), so every receiver can play it. It uses the same ffmpeg slots as Safari playback.
+
+A TV downloads the video itself, with no login, so BitPlay signs a link for that one file (valid for 6 hours) and serves it under `/cast/<token>/…`. These links skip the login middlewares. If the app sits behind **Cloudflare Access**, add a bypass for that path or the TV will be sent to the login page:
+
+1.  *Zero Trust → Access → Applications → Add an application → Self-hosted.*
+2.  Name it (for example "BitPlay cast"), set the domain of your BitPlay and the path `cast/*`.
+3.  Add a policy with action **Bypass** and include **Everyone**.
+
+Set `BITPLAY_PUBLIC_URL` (for example `https://yts.jrg9.com`) so the links use the address the TV can reach, whatever address you opened the page with. The signing key is created in `config/cast.key`; deleting it invalidates every link.
+
 ### Synopsis language
 
 The synopsis shown when you open a title comes from [TMDB](https://www.themoviedb.org/) when the server has a key, and from Cinemeta (English only) otherwise or when TMDB has nothing for that title.
@@ -206,6 +224,7 @@ If TMDB has no synopsis in your language for a title, it falls back to TMDB in E
 | `BITPLAY_AUTH_USERNAME` / `BITPLAY_AUTH_PASSWORD` | Set both to protect the entire app (UI, API, and video streams) with HTTP basic auth. Recommended for instances exposed to the internet. |
 | `BITPLAY_CF_TEAM_DOMAIN` / `BITPLAY_CF_AUD` | Turn on per-user accounts: your Access team domain (e.g. `myteam.cloudflareaccess.com`) and the application's AUD tag (Zero Trust → Access → Applications → your app → Overview). Set both. See [Multiple users](#multiple-users-cloudflare-access). |
 | `BITPLAY_TMDB_API_KEY` / `BITPLAY_TMDB_API_KEY_FILE` / `BITPLAY_TMDB_LANGUAGE` | Optional. TMDB key (v3 key or v4 read token), or the path of a file holding it, for synopses in your language, and the language code (default `es-MX`). Without a key synopses are in English. See [Synopsis language](#synopsis-language). |
+| `BITPLAY_PUBLIC_URL` | Address a Chromecast / Apple TV uses to reach this server for [casting](#casting-airplay-and-chromecast), e.g. `https://yts.jrg9.com`. Default: the address of the request. |
 | `BITPLAY_ADMINS` | Comma separated emails allowed to change settings and see logs. The first one also owns pre-existing history and direct (non-Cloudflare) access. |
 | `BITPLAY_MAX_REMUX` | Maximum concurrent ffmpeg jobs: remux streams and Safari/iOS HLS segment encodes (default `3`). |
 

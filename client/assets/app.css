@@ -609,3 +609,52 @@ body.bp-searching #greeting {
   color: var(--primary);
   text-decoration: underline;
 }
+
+/* casting: the player bar button and the Chromecast remote */
+.bp-player-bar [hidden],
+#cast-panel.hidden {
+  display: none;
+}
+.bp-player-bar #cast-btn {
+  margin-left: auto;
+}
+#cast-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px 14px;
+  padding: 12px clamp(12px, 3vw, 24px);
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  font-size: 0.875rem;
+}
+#cast-panel #cast-status {
+  font-weight: 600;
+}
+#cast-panel #cast-time {
+  color: rgba(255, 255, 255, 0.7);
+  font-variant-numeric: tabular-nums;
+}
+.bp-cast-btn {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: #fff;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.bp-cast-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+#cast-panel select {
+  height: 34px;
+  max-width: 200px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-md);
+  background: #111;
+  color: #fff;
+  padding: 0 8px;
+}

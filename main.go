@@ -583,6 +583,7 @@ func main() {
 	http.HandleFunc("/api/v1/featured", featuredHandler)
 	http.HandleFunc("/api/v1/overview", overviewHandler)
 	http.HandleFunc("/api/v1/trailer", trailerHandler)
+	http.HandleFunc("/api/v1/cast/token", castTokenHandler)
 	http.HandleFunc("/api/v1/catalog", streamingCatalogHandler)
 	http.HandleFunc("/api/v1/series/", seriesHandler)
 	http.HandleFunc("/api/v1/settings/search", requireAdmin(savePublicSearchSettingsHandler))
@@ -618,7 +619,9 @@ func main() {
 	// Create a server with graceful shutdown
 	server := &http.Server{
 		Addr: addr,
-		Handler: basicAuthMiddleware(identityMiddleware(http.DefaultServeMux)),
+		// /cast/ links carry their own signed token (cast.go), so they
+		// skip the login middlewares
+		Handler: castRouter(basicAuthMiddleware(identityMiddleware(http.DefaultServeMux))),
 	}
 
 	// Start the server in a goroutine

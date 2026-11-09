@@ -422,7 +422,12 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       }
       // switching audio re-requests the playlist, keep the position
       chosen.reload = (t) => {
-        player.src({ src: chosen.hlsUrl(chosen.currentAudio), type: chosen.type });
+        // after AirPlay was offered the video plays from the cast link
+        const src =
+          playback?.airplayBase
+            ? `${playback.airplayBase}/hls/master.m3u8${castAudioQuery()}`
+            : chosen.hlsUrl(chosen.currentAudio);
+        player.src({ src, type: chosen.type });
         player.one("loadedmetadata", () => {
           if (t) player.currentTime(t);
           player.play();
@@ -455,7 +460,8 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
   // Automatic subtitles (OpenSubtitles). Tracks are added as remote text
   // tracks; the server only downloads a subtitle when its track is loaded.
-  let autoSubtitleState = { player: null, tracks: [] };
+  // sources = the same tracks as {k, id, l, n}, to send to a cast receiver
+  let autoSubtitleState = { player: null, tracks: [], sources: [] };
 
   const clearAutoSubtitles = () => {
     if (player && autoSubtitleState.player === player) {
@@ -467,7 +473,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         }
       });
     }
-    autoSubtitleState = { player: null, tracks: [] };
+    autoSubtitleState = { player: null, tracks: [], sources: [] };
   };
 
   const autoLoadSubtitles = async (sessionId, file) => {
@@ -537,7 +543,15 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
           defaultEl = el;
         }
       });
-      autoSubtitleState = { player: currentPlayer, tracks: added };
+      autoSubtitleState = {
+        player: currentPlayer,
+        tracks: added,
+        sources: data.tracks.map((t) => ({ k: "os", id: t.id, l: t.lang, n: t.label })),
+      };
+      // the subtitles are known now: refresh the cast link that carries them
+      if (casting.airplay) {
+        prepareCast().catch(() => {});
+      }
 
       // show the best match, keep the rest available in the captions menu
       const tracks = currentPlayer.textTracks();
@@ -1281,6 +1295,22 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       return;
     }
 
+    playback = {
+      sessionId,
+      file: initialFile,
+      chosen,
+      // subtitle files inside the torrent, for a cast receiver
+      torrentSubs: subtitleFiles
+        .filter((f) => /\.(srt|vtt)$/i.test(f.name))
+        .map((f) => {
+          const m = f.name.match(/\.([a-z]{2,3})\.(srt|vtt)$/i);
+          return { k: "tf", f: f.index, l: m ? m[1] : "en", n: m ? getLanguage(m[1]) : "English" };
+        }),
+      airplayBase: null, // set once the video plays from a cast link
+    };
+    casting.info = null;
+    casting.lastTime = 0;
+    casting.active = null;
     openPlayerOverlay();
     player = videojs(
       "video-player",
@@ -1341,6 +1371,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     );
     player.doubleTapFF();
     setupChosenPlayback(chosen);
+    initCast();
     // fire and forget: playback must not wait for the subtitle search
     autoLoadSubtitles(sessionId, initialFile);
     trackPlayback(sessionId, initialFile, opts.episode || null);
@@ -1373,6 +1404,11 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
             return;
           }
           stopTracking();
+          endCasting(); // another file: the cast link was for the old one
+          playback.file = file;
+          playback.chosen = next;
+          playback.airplayBase = null;
+          casting.info = null;
           player.src({ src: next.src, type: next.type });
           setupChosenPlayback(next);
           autoLoadSubtitles(sessionId, file);
@@ -1652,6 +1688,8 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     document.body.classList.add("bp-noscroll");
   };
   const closePlayerOverlay = () => {
+    endCasting();
+    castBtn.hidden = true;
     nextEpisodeToken++;
     document.querySelector("#next-episode")?.remove();
     document.querySelector("#download-status")?.remove();
@@ -1669,8 +1707,332 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     document.querySelector("#subtitle-upload-wrapper").classList.add("hidden");
     playerOverlay.classList.add("hidden");
     document.body.classList.toggle("bp-noscroll", sheetOpen());
+    playback = null;
     // positions changed while watching
     renderLibrary();
+  };
+
+  // ---------------------------------------------------------------------
+  // Casting (server: cast.go). A receiver downloads the video on its own and
+  // can't log in, so the server signs a link for this one file (plus the
+  // loaded subtitles). Safari offers AirPlay (the video element switches to
+  // that link, which also carries the subtitles inside its playlist); Chrome
+  // offers Chromecast through Google's sender library, loaded on demand.
+  // ---------------------------------------------------------------------
+  let playback = null; // {sessionId, file, chosen, torrentSubs, airplayBase}
+  const casting = { info: null, pending: null, pendingSig: "", airplay: false, sdk: null, ctx: null, remote: null, controller: null, lastTime: 0, active: null };
+  const castBtn = document.querySelector("#cast-btn");
+  const castPanel = document.querySelector("#cast-panel");
+
+  const castSubSources = () =>
+    [...autoSubtitleState.sources, ...(playback?.torrentSubs || [])].slice(0, 8);
+  const castAudioQuery = () => {
+    const a = playback?.chosen?.currentAudio;
+    return a != null ? `?audio=${a}` : "";
+  };
+  const castTitle = () =>
+    (playback?.file?.name || "BitPlay").split("/").pop().replace(/\.[a-z0-9]{2,4}$/i, "");
+
+  // the signed link for the current file and subtitles; reused while valid
+  const prepareCast = async () => {
+    if (!playback) {
+      return null;
+    }
+    const sig = JSON.stringify([playback.sessionId, playback.file.index, castSubSources()]);
+    if (casting.info && casting.info.sig === sig && casting.info.expiresAt * 1000 - Date.now() > 10 * 60 * 1000) {
+      return casting.info;
+    }
+    if (casting.pending && casting.pendingSig === sig) {
+      return casting.pending;
+    }
+    casting.pendingSig = sig;
+    casting.pending = fetch("/api/v1/cast/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session: playback.sessionId,
+        file: playback.file.index,
+        subs: castSubSources(),
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || "Could not prepare casting");
+        }
+        casting.info = { ...data, sig };
+        return casting.info;
+      })
+      .finally(() => {
+        casting.pending = null;
+      });
+    return casting.pending;
+  };
+
+  const castError = (message) =>
+    butterup.toast({
+      message,
+      location: "top-right",
+      icon: true,
+      dismissable: true,
+      type: "error",
+    });
+
+  // --- AirPlay (Safari, iOS) -------------------------------------------
+  const airplaySupported = () =>
+    isWebKitOnly &&
+    typeof document.createElement("video").webkitShowPlaybackTargetPicker === "function";
+
+  const startAirPlay = () => {
+    const video = player?.tech(true)?.el();
+    if (!video || typeof video.webkitShowPlaybackTargetPicker !== "function") {
+      castError("AirPlay is not available in this browser");
+      return;
+    }
+    if (playback.airplayBase) {
+      video.webkitShowPlaybackTargetPicker();
+      return;
+    }
+    // The picker needs the tap that opened it, so use the link that was
+    // prepared in the background when there is one
+    const go = (info) => {
+      const resumeAt = player.currentTime() || 0;
+      const wasPlaying = !player.paused();
+      // the TV gets the subtitles from the playlist: drop the page's copies,
+      // but keep a file the viewer uploaded by hand
+      const remote = player.remoteTextTracks();
+      for (let i = remote.length - 1; i >= 0; i--) {
+        if (!String(remote[i].src || "").startsWith("blob:")) {
+          player.removeRemoteTextTrack(remote[i]);
+        }
+      }
+      playback.airplayBase = info.base;
+      player.src({
+        src: `${info.base}/hls/master.m3u8${castAudioQuery()}`,
+        type: "application/x-mpegURL",
+      });
+      player.one("loadedmetadata", () => {
+        if (resumeAt) player.currentTime(resumeAt);
+        if (wasPlaying) player.play();
+      });
+      video.webkitShowPlaybackTargetPicker();
+    };
+    if (casting.info && casting.info.expiresAt * 1000 - Date.now() > 10 * 60 * 1000) {
+      go(casting.info);
+    } else {
+      prepareCast().then((info) => info && go(info)).catch((err) => castError(err.message));
+    }
+  };
+
+  const watchAirPlay = () => {
+    const video = player.tech(true)?.el();
+    if (!video) {
+      return;
+    }
+    video.setAttribute("x-webkit-airplay", "allow");
+    video.addEventListener("webkitplaybacktargetavailabilitychanged", (e) => {
+      castBtn.hidden = e.availability !== "available";
+    });
+    castBtn.textContent = "AirPlay";
+    castBtn.onclick = startAirPlay;
+  };
+
+  // --- Chromecast (Chrome) ---------------------------------------------
+  const loadCastSdk = () => {
+    if (!casting.sdk) {
+      casting.sdk = new Promise((resolve) => {
+        window.__onGCastApiAvailable = (ok) =>
+          resolve(Boolean(ok && window.cast?.framework && window.chrome?.cast?.media));
+        const script = document.createElement("script");
+        script.src = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
+        script.onerror = () => resolve(false);
+        document.head.appendChild(script);
+        setTimeout(() => resolve(false), 8000);
+      });
+    }
+    return casting.sdk;
+  };
+
+  const castSession = () => casting.ctx?.getCurrentSession() || null;
+
+  const refreshCastPanel = () => {
+    const session = castSession();
+    if (!session || !casting.active) {
+      return;
+    }
+    const remote = casting.remote;
+    if (remote.currentTime) {
+      casting.lastTime = remote.currentTime;
+    }
+    document.querySelector("#cast-status").textContent =
+      "Casting to " + (session.getCastDevice()?.friendlyName || "Chromecast");
+    document.querySelector("#cast-toggle").textContent = remote.isPaused ? "Play" : "Pause";
+    document.querySelector("#cast-time").textContent =
+      formatClock(remote.currentTime || 0) + (remote.duration ? " / " + formatClock(remote.duration) : "");
+  };
+
+  const showCastPanel = (subs) => {
+    const select = document.querySelector("#cast-subs");
+    select.innerHTML = "";
+    const off = document.createElement("option");
+    off.value = "";
+    off.textContent = "Subtitles off";
+    select.appendChild(off);
+    subs.forEach((s, i) => {
+      const o = document.createElement("option");
+      o.value = String(i + 1);
+      o.textContent = s.n;
+      select.appendChild(o);
+    });
+    select.value = subs.length ? "1" : "";
+    select.hidden = !subs.length;
+    castPanel.classList.remove("hidden");
+    refreshCastPanel();
+  };
+
+  const sendToChromecast = async () => {
+    const media = window.chrome.cast.media;
+    let info;
+    try {
+      info = await prepareCast();
+    } catch (err) {
+      castError(err.message);
+      return;
+    }
+    const session = castSession();
+    if (!info || !session) {
+      return;
+    }
+    const subs = info.subs || [];
+    const mediaInfo = new media.MediaInfo(
+      `${info.base}/hls/index.m3u8${castAudioQuery()}`,
+      "application/x-mpegURL"
+    );
+    mediaInfo.streamType = media.StreamType.BUFFERED;
+    mediaInfo.metadata = new media.GenericMediaMetadata();
+    mediaInfo.metadata.title = castTitle();
+    // text tracks are side-loaded: the video playlist carries none
+    mediaInfo.tracks = subs.map((s, i) => {
+      const track = new media.Track(i + 1, media.TrackType.TEXT);
+      track.trackContentId = `${info.base}/hls/subs/${i}.vtt`;
+      track.trackContentType = "text/vtt";
+      track.subtype = media.TextTrackType.SUBTITLES;
+      track.name = s.n;
+      track.language = s.l;
+      return track;
+    });
+    if (subs.length) {
+      mediaInfo.textTrackStyle = new media.TextTrackStyle();
+    }
+    const request = new media.LoadRequest(mediaInfo);
+    request.currentTime = player?.currentTime() || 0;
+    request.autoplay = true;
+    if (subs.length) {
+      request.activeTrackIds = [1]; // the first one: the preferred language
+    }
+    try {
+      await session.loadMedia(request);
+    } catch (code) {
+      castError(`Chromecast could not load the video (${code})`);
+      return;
+    }
+    casting.active = { subs };
+    player.pause();
+    showCastPanel(subs);
+  };
+
+  const startChromecast = async () => {
+    if (!castSession()) {
+      const result = await casting.ctx.requestSession();
+      if (result && result !== "success") {
+        if (result !== "cancel") {
+          castError(`Could not connect to the Chromecast (${result})`);
+        }
+        return;
+      }
+    }
+    await sendToChromecast();
+  };
+
+  // back to the page: continue where the TV stopped
+  const endCasting = () => {
+    if (casting.ctx && castSession()) {
+      casting.ctx.endCurrentSession(true);
+    }
+    if (casting.active) {
+      casting.active = null;
+      castPanel.classList.add("hidden");
+      if (player && casting.lastTime) {
+        player.currentTime(casting.lastTime);
+      }
+    }
+  };
+
+  const initChromecast = async () => {
+    if (!(await loadCastSdk())) {
+      return;
+    }
+    if (!casting.ctx) {
+      const fw = window.cast.framework;
+      casting.ctx = fw.CastContext.getInstance();
+      casting.ctx.setOptions({
+        receiverApplicationId: window.chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+        autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
+      });
+      casting.remote = new fw.RemotePlayer();
+      casting.controller = new fw.RemotePlayerController(casting.remote);
+      casting.controller.addEventListener(fw.RemotePlayerEventType.ANY_CHANGE, refreshCastPanel);
+      casting.ctx.addEventListener(fw.CastContextEventType.CAST_STATE_CHANGED, (e) => {
+        castBtn.hidden = e.castState === fw.CastState.NO_DEVICES_AVAILABLE;
+      });
+      casting.ctx.addEventListener(fw.CastContextEventType.SESSION_STATE_CHANGED, (e) => {
+        if (e.sessionState === fw.SessionState.SESSION_ENDED && casting.active) {
+          endCasting();
+        }
+      });
+      const bySelector = (sel, fn) => document.querySelector(sel).addEventListener("click", fn);
+      bySelector("#cast-toggle", () => casting.controller.playOrPause());
+      bySelector("#cast-back10", () => {
+        casting.remote.currentTime = Math.max(0, casting.remote.currentTime - 10);
+        casting.controller.seek();
+      });
+      bySelector("#cast-fwd10", () => {
+        casting.remote.currentTime = casting.remote.currentTime + 10;
+        casting.controller.seek();
+      });
+      bySelector("#cast-stop", endCasting);
+      document.querySelector("#cast-subs").addEventListener("change", (e) => {
+        const ids = e.target.value ? [Number(e.target.value)] : [];
+        const mediaSession = castSession()?.getSessionObj()?.media?.[0];
+        if (mediaSession) {
+          mediaSession.editTracksInfo(
+            new window.chrome.cast.media.EditTracksInfoRequest(ids),
+            () => {},
+            (err) => castError(`Could not change the subtitles (${err.code})`)
+          );
+        }
+      });
+    }
+    castBtn.textContent = "Cast";
+    castBtn.onclick = () => startChromecast().catch((err) => castError(err.message || String(err)));
+    castBtn.hidden = casting.ctx.getCastState() === window.cast.framework.CastState.NO_DEVICES_AVAILABLE;
+  };
+
+  // called for every playback: pick the cast flavour this browser supports
+  const initCast = async () => {
+    castBtn.hidden = true;
+    casting.airplay = false;
+    const caps = await getCapabilities();
+    if (!caps.ffmpeg || !playback) {
+      return; // the cast stream is the server's HLS, which needs ffmpeg
+    }
+    if (airplaySupported()) {
+      casting.airplay = true;
+      prepareCast().catch(() => {}); // ready before the first tap
+      watchAirPlay();
+    } else if (window.chrome && !isWebKitOnly) {
+      initChromecast().catch((err) => console.warn("Chromecast unavailable:", err));
+    }
   };
 
   const buildPoster = (meta, width = 70, height = 104) => {

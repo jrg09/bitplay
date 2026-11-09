@@ -186,6 +186,7 @@
     <div id="player-overlay" class="hidden">
       <div class="bp-player-bar">
         <button type="button" id="player-close" class="bp-link">&larr; Back</button>
+        <button type="button" id="cast-btn" class="bp-link" hidden>Cast</button>
         <span id="subtitle-upload-wrapper" class="hidden">
           <label for="subtitle-file" class="bp-link" style="cursor: pointer">+ Add subtitle file (.srt / .vtt)</label>
           <input type="file" id="subtitle-file" accept=".srt,.vtt" class="hidden" />
@@ -193,6 +194,16 @@
       </div>
       <div id="player-stage">
         <video id="video-player" class="video-js"></video>
+      </div>
+      <!-- Chromecast remote (index.js): the video plays on the TV -->
+      <div id="cast-panel" class="hidden">
+        <span id="cast-status"></span>
+        <button type="button" id="cast-back10" class="bp-cast-btn">&minus;10 s</button>
+        <button type="button" id="cast-toggle" class="bp-cast-btn">Pause</button>
+        <button type="button" id="cast-fwd10" class="bp-cast-btn">+10 s</button>
+        <span id="cast-time"></span>
+        <select id="cast-subs" aria-label="Subtitles on the TV"></select>
+        <button type="button" id="cast-stop" class="bp-cast-btn">Stop casting</button>
       </div>
     </div>
 

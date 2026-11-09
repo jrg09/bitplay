@@ -24,6 +24,7 @@ Tests are plain `go test`, no network or ffmpeg required (ffmpeg arguments are b
 | `torrentsearch.go` | Built-in search over YTS / TPB / EZTV |
 | `subtitles.go`, `subavail.go` | OpenSubtitles lookup; Spanish-subtitle availability per search result |
 | `overview.go`, `trailer.go` | Title synopsis and YouTube trailer: TMDB (language from `BITPLAY_TMDB_LANGUAGE`) then Cinemeta fallback, cached |
+| `cast.go` | Casting: signed `/cast/<token>/…` links (HLS + subtitle playlists, plain VTT) that skip the login middlewares |
 | `auth.go`, `static.go` | Cloudflare Access users and admins; versioned, never-cached static files |
 | `client/assets/index.js` | All UI logic, including playback source selection (`pickSource`) |
 | `client/assets/app.css` | Page layout (top bar, rows, poster grid, sheets, player overlay). Plain CSS on the theme variables, no build step |
@@ -47,6 +48,7 @@ The server probes (`ffprobe`), the **browser** decides how to play, because only
 
 ## Gotchas
 
+*   **Casting links bypass login on purpose.** `castRouter` in `main.go` sends `/cast/` straight to `castHandler`, which only trusts the HMAC token; keep every new `/cast/` route scoped to what the token lists. A TV has no cookies, so Cloudflare Access needs a Bypass policy for `cast/*`. AirPlay needs the subtitles inside the HLS master playlist (the page's own text tracks don't travel); Chromecast side-loads WebVTT. `castBtn`/`casting` in `index.js` hold the client side.
 *   **Stale JS behind Cloudflare:** the app is served through a CDN, and a fresh `index.html` with a cached old `index.js` renders half a page (no greeting, no rows). `static.go` links `index.js`, `app.css` and `output.css` with a content hash (`?v=`) and sends `Cache-Control: no-store`. Don't link new first-party assets from `index.html` without adding them to `versionedAssets`.
 *   **iOS rejects the progressive remux stream** (`Accept-Ranges: none`) even when codecs are fine. Do not "fix" Safari by only changing codecs; it needs HLS.
 *   `canPlayType` lies on WebKit ("maybe" for HEVC/10-bit), so WebKit detection (`isWebKitOnly`) overrides it. iPadOS reports as a Mac; detect with `maxTouchPoints`.
