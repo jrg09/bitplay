@@ -41,6 +41,13 @@ func TestParseStreamingCatalog(t *testing.T) {
 }
 
 func TestStreamingCatalogURL(t *testing.T) {
+	// Paramount+ is not in the addon's manifest but its catalog is served
+	if got := streamingServices["pmp"].catalogURL("movie"); got != streamingCatalogBase+"/catalog/movie/pmp.json" {
+		t.Errorf("pmp url = %s", got)
+	}
+	if streamingServices["pmp"].Label != "Paramount+" {
+		t.Errorf("pmp label = %q", streamingServices["pmp"].Label)
+	}
 	if got := streamingServices["hbm"].catalogURL("series"); got != streamingCatalogBase+"/catalog/series/hbm.json" {
 		t.Errorf("hbm url = %s", got)
 	}

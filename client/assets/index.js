@@ -2736,6 +2736,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     ["dnp", "Disney+"],
     ["amp", "Prime Video"],
     ["atp", "Apple TV+"],
+    ["pmp", "Paramount+"],
   ];
   const HOME_ROWS = [
     { id: "popular", title: "Popular" },

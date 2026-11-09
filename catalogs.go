@@ -4,7 +4,8 @@ package main
 // Stremio addon "Streaming Catalogs". Verified 2026-11-04:
 //   GET <base>/catalog/<movie|series>/<service>.json
 //       -> {"metas":[{"imdb_id","type","name","year","releaseInfo","poster","imdbRating","genres"}]}
-//   services: nfx Netflix, hbm HBO Max, dnp Disney+, amp Prime Video, atp Apple TV+
+//   services: nfx Netflix, hbm HBO Max, dnp Disney+, amp Prime Video, atp Apple TV+,
+//   pmp Paramount+ (not in the manifest, but served with the default config)
 //   (plus Netflix Top 10 by country with a configured URL, see streamingServices)
 // Some text fields come double-encoded (UTF-8 read as Windows-1252, e.g.
 // "2022â€“"); fixMojibake repairs them.
@@ -52,6 +53,7 @@ var streamingServices = map[string]streamingService{
 	"dnp":     {Label: "Disney+", Catalog: "dnp"},
 	"amp":     {Label: "Prime Video", Catalog: "amp"},
 	"atp":     {Label: "Apple TV+", Catalog: "atp"},
+	"pmp":     {Label: "Paramount+", Catalog: "pmp"},
 }
 
 func (s streamingService) catalogURL(typ string) string {
@@ -138,7 +140,7 @@ func loadStreamingCatalog(ctx context.Context, service string, svc streamingServ
 	return groups, nil
 }
 
-// streamingCatalogHandler: GET /api/v1/catalog?service=nfx|hbm|dnp|amp|atp&type=movie|series
+// streamingCatalogHandler: GET /api/v1/catalog?service=nfx|hbm|dnp|amp|atp|pmp&type=movie|series
 func streamingCatalogHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
