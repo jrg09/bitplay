@@ -1842,9 +1842,10 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     }
     note.textContent = "";
     const iframe = document.createElement("iframe");
-    iframe.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&playsinline=1&modestbranding=1`;
+    // no autoplay: the viewer presses play
+    iframe.src = `https://www.youtube-nocookie.com/embed/${id}?rel=0&playsinline=1&modestbranding=1`;
     iframe.title = `${meta.title || "Title"} trailer`;
-    iframe.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+    iframe.allow = "encrypted-media; picture-in-picture; fullscreen";
     iframe.allowFullscreen = true;
     iframe.referrerPolicy = "strict-origin-when-cross-origin";
     frame.appendChild(iframe);
