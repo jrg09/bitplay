@@ -568,6 +568,7 @@ func main() {
 	http.HandleFunc("/api/v1/settings/jackett", requireAdmin(saveJackettSettingsHandler))
 	http.HandleFunc("/api/v1/settings/subtitles", requireAdmin(saveSubtitleSettingsHandler))
 	http.HandleFunc("/api/v1/subtitles/auto", subtitlesAutoHandler)
+	http.HandleFunc("/api/v1/subtitles/availability", subtitleAvailabilityHandler)
 	http.HandleFunc("/api/v1/subtitles/file/", subtitleFileHandler)
 	http.HandleFunc("/api/v1/subtitles/test", requireAdmin(testSubtitleConnectionHandler))
 	http.HandleFunc("/api/v1/library", libraryListHandler)

@@ -1583,6 +1583,47 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     return box;
   };
 
+  // Spanish subtitles for a search result (server: subavail.go). One lookup
+  // per title covers all its releases; levels are exact (same release
+  // group), similar (same source and resolution) and other.
+  const subsLevels = new Map(); // release title -> {level, sub}
+  const SUBS_LABELS = {
+    exact: ["ES subs · same release", "#16a34a"],
+    similar: ["ES subs · similar version", "#16a34a"],
+    other: ["ES subs · other version", ""],
+  };
+  const applySubsBadge = (badge) => {
+    const found = subsLevels.get(badge.dataset.release);
+    const label = found && SUBS_LABELS[found.level];
+    badge.hidden = !label;
+    if (label) {
+      badge.textContent = label[0];
+      badge.style.color = label[1];
+      badge.title = found.sub ? `Subtitle for: ${found.sub}` : "";
+    }
+  };
+  const loadSubsAvailability = async (meta, results) => {
+    if (!settings?.enableSubtitles || !settings?.openSubtitlesApiKeySet) {
+      return;
+    }
+    if (!meta || !/^tt\d+$/.test(meta.imdb || "")) {
+      return;
+    }
+    const releases = results.map((r) => r.title).filter((t) => t && !subsLevels.has(t));
+    if (!releases.length) {
+      return;
+    }
+    const res = await fetch("/api/v1/subtitles/availability", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imdb: meta.imdb, type: meta.type, releases: releases.slice(0, 60) }),
+    }).catch(() => null);
+    const data = res && res.ok ? await res.json().catch(() => null) : null;
+    if (data && data.enabled) {
+      Object.entries(data.results || {}).forEach(([title, v]) => subsLevels.set(title, v));
+    }
+  };
+
   const buildTorrentRow = (result, opts = {}) => {
     const row = document.createElement("div");
     row.className = "flex items-center gap-3";
@@ -1604,7 +1645,12 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     ]
       .filter(Boolean)
       .join(" · ");
-    text.append(name, info);
+    const badge = document.createElement("span");
+    badge.className = "text-xs font-medium text-muted-foreground";
+    badge.dataset.release = result.title;
+    badge.hidden = true;
+    applySubsBadge(badge); // already known from an earlier lookup
+    text.append(name, info, badge);
 
     const watchBtn = document.createElement("button");
     watchBtn.type = "button";
@@ -1669,10 +1715,22 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
   };
 
   // torrent rows with a "Show N more" toggle
-  const buildTorrentList = (results, shownByDefault = GROUP_TORRENTS_SHOWN, opts = {}) => {
+  const buildTorrentList = (results, shownByDefault = GROUP_TORRENTS_SHOWN, opts = {}, subsMeta = null) => {
     const list = document.createElement("div");
     list.className = "flex flex-col gap-2";
     let expanded = false;
+    const refreshBadges = () =>
+      list.querySelectorAll("[data-release]").forEach(applySubsBadge);
+    if (subsMeta && "IntersectionObserver" in window) {
+      // look subtitles up only for lists the user can actually see
+      const observer = new IntersectionObserver((entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          observer.disconnect();
+          loadSubsAvailability(subsMeta, results).then(refreshBadges);
+        }
+      });
+      observer.observe(list);
+    }
     const renderRows = () => {
       list.innerHTML = "";
       const shown = expanded ? results : results.slice(0, shownByDefault);
@@ -1691,6 +1749,10 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         });
         list.appendChild(more);
       }
+      if (subsMeta) {
+        // rows revealed by "Show more" weren't covered by the first lookup
+        loadSubsAvailability(subsMeta, shown).then(refreshBadges);
+      }
     };
     renderRows();
     return list;
@@ -1705,7 +1767,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     }
     const body = document.createElement("div");
     body.className = "flex flex-col gap-2 flex-1 min-w-0";
-    body.append(buildMetaHeader(meta), buildTorrentList(group.results || []));
+    body.append(buildMetaHeader(meta), buildTorrentList(group.results || [], GROUP_TORRENTS_SHOWN, {}, meta));
     card.appendChild(body);
     return card;
   };
@@ -2208,7 +2270,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
             const h = document.createElement("span");
             h.className = "text-xs font-semibold text-muted-foreground";
             h.textContent = label;
-            others.append(h, buildTorrentList(results, 4, episodeOpts));
+            others.append(h, buildTorrentList(results, 4, episodeOpts, { imdb: meta.imdb, type: "series" }));
           };
           if (episodeTorrents.length) section("This episode", episodeTorrents);
           if (packs.length) section("Season packs", packs);
@@ -2485,7 +2547,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       list.append(none);
       return;
     }
-    list.append(buildTorrentList(group.results, 6));
+    list.append(buildTorrentList(group.results, 6, {}, group.meta));
   };
 
   const buildFeaturedTile = (group) => {

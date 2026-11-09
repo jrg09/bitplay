@@ -160,6 +160,7 @@ Use **Test Connection** to validate the credentials. Notes:
 
 *   Subtitles count against your OpenSubtitles daily download quota. Only the displayed track is downloaded; the other languages are fetched when you select them, and every downloaded subtitle is cached in memory for the life of the process.
 *   Ranking prefers hash matches, non machine/AI-translated subtitles, non hearing-impaired ones, trusted uploaders, popular downloads and releases whose name overlaps with the video file name.
+*   **Spanish subtitles per search result:** with subtitles enabled, each torrent in the results shows whether Spanish subtitles (`es`, `ea`, `sp`) exist for that version: *same release* (made for the same release group), *similar version* (same source and resolution) or *other version*; nothing is shown when there are none. Search results only have a release name, not the file, so this compares release names instead of the exact file hash, and it is a good hint rather than a guarantee. The lookup is per title (and season / episode), cached for 24 hours, only runs for results you can see, and uses the API key only (no download quota).
 *   Credentials are stored in `config/settings.json` (mode `0600`) and are never sent back to the browser.
 *   The OpenSubtitles API is reached through the configured SOCKS5 proxy if one is enabled.
 
