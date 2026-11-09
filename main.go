@@ -595,13 +595,9 @@ func main() {
 	http.HandleFunc("/api/v1/cache/purge", requireAdmin(purgeCacheHandler))
 	http.HandleFunc("/api/v1/capabilities", capabilitiesHandler)
 
-	// Set up client file serving
-	// no-cache: revalidate on every load so updates aren't stuck behind stale assets
-	fileServer := http.FileServer(http.Dir("./client"))
-	noCacheFiles := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache")
-		fileServer.ServeHTTP(w, r)
-	})
+	// Set up client file serving (static.go: versioned links, never cached,
+	// so a CDN or browser can't pair a stale JS with a fresh page)
+	noCacheFiles := staticHandler("./client")
 	http.Handle("/", noCacheFiles)
 	http.Handle("/client/", http.StripPrefix("/client/", noCacheFiles))
 	http.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {

@@ -45,6 +45,7 @@ The server probes (`ffprobe`), the **browser** decides how to play, because only
 
 ## Gotchas
 
+*   **Stale JS behind Cloudflare:** the app is served through a CDN, and a fresh `index.html` with a cached old `index.js` renders half a page (no greeting, no rows). `static.go` links `index.js`, `app.css` and `output.css` with a content hash (`?v=`) and sends `Cache-Control: no-store`. Don't link new first-party assets from `index.html` without adding them to `versionedAssets`.
 *   **iOS rejects the progressive remux stream** (`Accept-Ranges: none`) even when codecs are fine. Do not "fix" Safari by only changing codecs; it needs HLS.
 *   `canPlayType` lies on WebKit ("maybe" for HEVC/10-bit), so WebKit detection (`isWebKitOnly`) overrides it. iPadOS reports as a Mac; detect with `maxTouchPoints`.
 *   iOS plays in its native player, which only shows **native text tracks**. `nativeTextTracks` is `true` on WebKit and `false` elsewhere (video.js overlay).
