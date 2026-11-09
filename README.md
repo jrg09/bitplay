@@ -9,6 +9,7 @@ BitPlay is a web application built with Go that allows you to stream video conte
 *   **Direct Torrent Streaming:** Stream video files from magnet links or torrent files directly without needing to download them completely first.
 *   **MKV & Audio Track Support:** MKV files are remuxed on the fly with ffmpeg (no re-encoding), and files with multiple audio tracks get a track picker. If a codec genuinely can't play in your browser, BitPlay tells you which one and gives you the stream URL to open in VLC or mpv instead.
 *   **Streaming-style UI:** a sticky top bar with search, a home page of poster rows (continue watching, popular, recently added, top lists and one row per streaming service), a poster grid for search results, details in a sheet over the page and a full screen player. Works on phones.
+*   **Synopsis:** opening a title shows a short synopsis (three lines, click for the rest). In Spanish (or any language) from TMDB when you set `BITPLAY_TMDB_API_KEY`; otherwise in English from Cinemeta, with no setup. See [Synopsis language](#synopsis-language).
 *   **Safari & iOS Playback:** iPhone, iPad and Safari can't play the progressive MP4 used for MKV remuxing, so BitPlay detects WebKit browsers and serves the video as on-demand HLS instead, re-encoding on the fly to H.264 + AAC. Seeking works natively. See [Safari and iOS playback](#safari-and-ios-playback).
 *   **Web-Based UI:** Access and control BitPlay through a user-friendly web interface.
 *   **Proxy Support:** Configure a SOCKS5 proxy for all torrent-related traffic (fetching metadata, peer connections). (Note: HTTP proxies are not currently supported).
@@ -188,12 +189,22 @@ If BitPlay is published through a Cloudflare Tunnel protected by Cloudflare Acce
 
 Without `BITPLAY_CF_TEAM_DOMAIN` the app stays single-user, as before.
 
+### Synopsis language
+
+The synopsis shown when you open a title comes from [TMDB](https://www.themoviedb.org/) when the server has a key, and from Cinemeta (English only) otherwise or when TMDB has nothing for that title.
+
+1.  Create a free TMDB account and request an API key under *Settings → API* (either the "API Key" or the "API Read Access Token" works).
+2.  Set `BITPLAY_TMDB_API_KEY` to it and restart. Optionally set `BITPLAY_TMDB_LANGUAGE` (default `es-MX`, for example `es-ES` or `en-US`).
+
+If TMDB has no synopsis in your language for a title, it falls back to TMDB in English, then to Cinemeta. Answers are cached for a week.
+
 ### Environment Variables
 
 | Variable | Description |
 | --- | --- |
 | `BITPLAY_AUTH_USERNAME` / `BITPLAY_AUTH_PASSWORD` | Set both to protect the entire app (UI, API, and video streams) with HTTP basic auth. Recommended for instances exposed to the internet. |
 | `BITPLAY_CF_TEAM_DOMAIN` / `BITPLAY_CF_AUD` | Turn on per-user accounts: your Access team domain (e.g. `myteam.cloudflareaccess.com`) and the application's AUD tag (Zero Trust → Access → Applications → your app → Overview). Set both. See [Multiple users](#multiple-users-cloudflare-access). |
+| `BITPLAY_TMDB_API_KEY` / `BITPLAY_TMDB_LANGUAGE` | Optional. TMDB key (v3 key or v4 read token) for synopses in your language, and the language code (default `es-MX`). Without a key synopses are in English. See [Synopsis language](#synopsis-language). |
 | `BITPLAY_ADMINS` | Comma separated emails allowed to change settings and see logs. The first one also owns pre-existing history and direct (non-Cloudflare) access. |
 | `BITPLAY_MAX_REMUX` | Maximum concurrent ffmpeg jobs: remux streams and Safari/iOS HLS segment encodes (default `3`). |
 

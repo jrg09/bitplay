@@ -512,3 +512,23 @@ body.bp-searching #greeting {
   text-align: center;
   color: rgba(255, 255, 255, 0.6);
 }
+
+/* synopsis in the title sheets: three lines, click for the rest */
+.bp-synopsis {
+  margin: 8px 0 4px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
+}
+.bp-synopsis[hidden] {
+  display: none;
+}
+.bp-synopsis.open {
+  display: block;
+  -webkit-line-clamp: unset;
+}

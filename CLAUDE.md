@@ -22,7 +22,9 @@ Tests are plain `go test`, no network or ffmpeg required (ffmpeg arguments are b
 | `library.go`, `shows.go` | "Continue watching" and per-episode progress (`config/library.json`) |
 | `series.go`, `catalogs.go`, `featured.go`, `metadata.go` | Series/episodes, streaming catalogs, home page lists, Cinemeta metadata |
 | `torrentsearch.go` | Built-in search over YTS / TPB / EZTV |
-| `subtitles.go` | OpenSubtitles lookup |
+| `subtitles.go`, `subavail.go` | OpenSubtitles lookup; Spanish-subtitle availability per search result |
+| `overview.go` | Title synopsis: TMDB (language from `BITPLAY_TMDB_LANGUAGE`) then Cinemeta fallback, cached |
+| `auth.go`, `static.go` | Cloudflare Access users and admins; versioned, never-cached static files |
 | `client/assets/index.js` | All UI logic, including playback source selection (`pickSource`) |
 | `client/assets/app.css` | Page layout (top bar, rows, poster grid, sheets, player overlay). Plain CSS on the theme variables, no build step |
 

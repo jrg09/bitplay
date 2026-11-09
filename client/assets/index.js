@@ -1771,8 +1771,32 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     return row;
   };
 
-  // title, year, rating, type, IMDb link and genres of a title; series get
-  // an "Episodes" button unless opts.episodes === false
+  // Synopsis of a title (server: overview.go). Spanish from TMDB when the
+  // server has a key, English otherwise. One request per title and page.
+  const overviewCache = new Map();
+  const loadOverview = (meta) => {
+    const type = meta.type === "series" ? "series" : "movie";
+    const key = `${type}/${meta.imdb}`;
+    if (!overviewCache.has(key)) {
+      overviewCache.set(
+        key,
+        fetch(`/api/v1/overview?imdb=${encodeURIComponent(meta.imdb)}&type=${type}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => data?.overview || "")
+          .catch(() => "")
+          .then((text) => {
+            if (!text) {
+              overviewCache.delete(key); // try again next time it is opened
+            }
+            return text;
+          })
+      );
+    }
+    return overviewCache.get(key);
+  };
+
+  // title, year, rating, type, IMDb link, genres and synopsis of a title;
+  // series get an "Episodes" button unless opts.episodes === false
   const buildMetaHeader = (meta, opts = {}) => {
     const wrap = document.createElement("div");
     wrap.className = "flex flex-col";
@@ -1817,6 +1841,20 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       genres.className = "text-xs text-muted-foreground";
       genres.textContent = meta.genres.slice(0, 4).join(", ");
       wrap.appendChild(genres);
+    }
+    if (meta && /^tt\d+$/.test(meta.imdb || "")) {
+      const synopsis = document.createElement("p");
+      synopsis.className = "bp-synopsis";
+      synopsis.hidden = true;
+      synopsis.title = "Click to read more";
+      synopsis.addEventListener("click", () => synopsis.classList.toggle("open"));
+      wrap.appendChild(synopsis);
+      loadOverview(meta).then((text) => {
+        if (text) {
+          synopsis.textContent = text;
+          synopsis.hidden = false;
+        }
+      });
     }
     return wrap;
   };
