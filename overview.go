@@ -3,7 +3,9 @@ package main
 // Synopsis ("overview") of a movie or series, shown when a title is opened.
 //
 // With BITPLAY_TMDB_API_KEY set (a free themoviedb.org v3 API key, or a v4
-// read access token) the synopsis comes from TMDB in BITPLAY_TMDB_LANGUAGE
+// read access token), or BITPLAY_TMDB_API_KEY_FILE pointing to a file that
+// holds it (a mounted secret; read on every lookup, so no restart is needed
+// to change it), the synopsis comes from TMDB in BITPLAY_TMDB_LANGUAGE
 // (default es-MX), falling back to TMDB in English. Without a key, or when
 // TMDB has nothing, Cinemeta's English description is used, so the feature
 // works out of the box.
@@ -17,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -38,8 +41,38 @@ const (
 
 var tmdbLangRe = regexp.MustCompile(`^[a-z]{2}(-[A-Z]{2})?$`)
 
+var keyFileLineRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\s*=`)
+
+// parseKeyFile takes the first line that isn't blank or a # comment. It may
+// be the bare key or NAME=key, optionally quoted.
+func parseKeyFile(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = keyFileLineRe.ReplaceAllString(line, "")
+		return strings.Trim(strings.TrimSpace(line), `"'`)
+	}
+	return ""
+}
+
+var tmdbKeyFileWarned sync.Once
+
 func tmdbAPIKey() string {
-	return strings.TrimSpace(os.Getenv("BITPLAY_TMDB_API_KEY"))
+	if v := strings.TrimSpace(os.Getenv("BITPLAY_TMDB_API_KEY")); v != "" {
+		return v
+	}
+	path := strings.TrimSpace(os.Getenv("BITPLAY_TMDB_API_KEY_FILE"))
+	if path == "" {
+		return ""
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		tmdbKeyFileWarned.Do(func() { log.Printf("Overview: cannot read BITPLAY_TMDB_API_KEY_FILE: %v", err) })
+		return ""
+	}
+	return parseKeyFile(string(b))
 }
 
 func tmdbLanguage() string {

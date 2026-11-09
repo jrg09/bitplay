@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -153,5 +155,52 @@ func TestOverviewHandler(t *testing.T) {
 	overviewHandler(rec, httptest.NewRequest(http.MethodPost, "/api/v1/overview?imdb=tt0903747", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST: code %d", rec.Code)
+	}
+}
+
+func TestParseKeyFile(t *testing.T) {
+	for in, want := range map[string]string{
+		"0123456789abcdef0123456789abcdef\n":     "0123456789abcdef0123456789abcdef",
+		"  abc123  ":                             "abc123",
+		"TMDB_KEY=abc123\n":                      "abc123",
+		"BITPLAY_TMDB_API_KEY = \"abc123\"\r\n":  "abc123",
+		"# my TMDB key\n\nabc123\nsecond line\n": "abc123",
+		"eyJhbGciOi.payload.signature\n":         "eyJhbGciOi.payload.signature",
+		"":                                       "",
+		"\n# only a comment\n":                   "",
+	} {
+		if got := parseKeyFile(in); got != want {
+			t.Errorf("parseKeyFile(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestTMDBAPIKeySources(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "tmdb.key")
+	if err := os.WriteFile(file, []byte("filekey123\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BITPLAY_TMDB_API_KEY", "")
+	t.Setenv("BITPLAY_TMDB_API_KEY_FILE", file)
+	if got := tmdbAPIKey(); got != "filekey123" {
+		t.Errorf("from file = %q", got)
+	}
+	// the file is re-read, so a rotated key needs no restart
+	if err := os.WriteFile(file, []byte("rotated456\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := tmdbAPIKey(); got != "rotated456" {
+		t.Errorf("after rotation = %q", got)
+	}
+	// an explicit variable wins
+	t.Setenv("BITPLAY_TMDB_API_KEY", "envkey")
+	if got := tmdbAPIKey(); got != "envkey" {
+		t.Errorf("env = %q", got)
+	}
+	// a missing file means no key, not a crash
+	t.Setenv("BITPLAY_TMDB_API_KEY", "")
+	t.Setenv("BITPLAY_TMDB_API_KEY_FILE", filepath.Join(t.TempDir(), "missing"))
+	if got := tmdbAPIKey(); got != "" {
+		t.Errorf("missing file = %q", got)
 	}
 }
