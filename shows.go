@@ -83,7 +83,7 @@ func episodeLess(s1, e1, s2, e2 int) bool {
 	return e1 < e2
 }
 
-func showLocked(lib *libraryData, imdb string) *showProgress {
+func showLocked(lib *userLibrary, imdb string) *showProgress {
 	if lib.Shows == nil {
 		lib.Shows = map[string]*showProgress{}
 	}
@@ -100,7 +100,7 @@ func showLocked(lib *libraryData, imdb string) *showProgress {
 
 // showRefFromNameLocked links a file named like an episode to a show that
 // is already tracked (exactly one must match).
-func showRefFromNameLocked(lib *libraryData, fileName string) *seriesRef {
+func showRefFromNameLocked(lib *userLibrary, fileName string) *seriesRef {
 	rel, ok := classifySeriesName(fileName)
 	if !ok || rel.Pack {
 		return nil
@@ -119,7 +119,7 @@ func showRefFromNameLocked(lib *libraryData, fileName string) *seriesRef {
 }
 
 // showRecordProgressLocked mirrors a file's progress onto its episode.
-func showRecordProgressLocked(lib *libraryData, ref *seriesRef, e *libraryEntry) {
+func showRecordProgressLocked(lib *userLibrary, ref *seriesRef, e *libraryEntry) {
 	if !ref.valid() {
 		ref = showRefFromNameLocked(lib, e.FileName)
 	}
@@ -153,7 +153,7 @@ func showRecordProgressLocked(lib *libraryData, ref *seriesRef, e *libraryEntry)
 }
 
 // showLinkedFilesLocked: library entry key -> imdb of its show.
-func showLinkedFilesLocked(lib *libraryData) map[string]string {
+func showLinkedFilesLocked(lib *userLibrary) map[string]string {
 	out := map[string]string{}
 	for _, sp := range lib.Shows {
 		for _, ep := range sp.Episodes {
@@ -232,10 +232,10 @@ type episodeProgressView struct {
 }
 
 // showSnapshot copies a show's progress for use outside the lock.
-func showSnapshot(imdb string) (*showProgress, map[string]episodeProgressView) {
+func showSnapshot(userID, imdb string) (*showProgress, map[string]episodeProgressView) {
 	library.Lock()
 	defer library.Unlock()
-	sp := libraryLocked().Shows[imdb]
+	sp := userLib(libraryLocked(), userID).Shows[imdb]
 	views := map[string]episodeProgressView{}
 	if sp == nil {
 		return nil, views
@@ -284,8 +284,9 @@ func seriesMarkHandler(w http.ResponseWriter, r *http.Request, info *seriesInfo)
 	}
 
 	now := time.Now().Unix()
+	uid := currentUser(r).ID
 	library.Lock()
-	lib := libraryLocked()
+	lib := userLib(libraryLocked(), uid)
 	sp := showLocked(lib, info.Meta.IMDb)
 	sp.Title = info.Meta.Title
 	if sp.Poster == "" {
@@ -319,7 +320,7 @@ func seriesMarkHandler(w http.ResponseWriter, r *http.Request, info *seriesInfo)
 	librarySaveLocked()
 	library.Unlock()
 
-	sp, views := showSnapshot(info.Meta.IMDb)
+	sp, views := showSnapshot(uid, info.Meta.IMDb)
 	respondWithJSON(w, http.StatusOK, map[string]interface{}{"progress": views, "next": findNextEpisode(info, sp)})
 }
 
@@ -341,8 +342,9 @@ func libraryShowsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	uid := currentUser(r).ID
 	library.Lock()
-	lib := libraryLocked()
+	lib := userLib(libraryLocked(), uid)
 	var ids []string
 	for id, sp := range lib.Shows {
 		if !sp.Hidden {
@@ -359,7 +361,7 @@ func libraryShowsHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	items := make([]showListItem, 0, len(ids))
 	for _, id := range ids {
-		sp, _ := showSnapshot(id)
+		sp, _ := showSnapshot(uid, id)
 		if sp == nil {
 			continue
 		}
@@ -404,7 +406,7 @@ func libraryShowHideHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	library.Lock()
 	defer library.Unlock()
-	sp := libraryLocked().Shows[in.IMDb]
+	sp := userLib(libraryLocked(), currentUser(r).ID).Shows[in.IMDb]
 	if sp == nil {
 		respondWithJSON(w, http.StatusNotFound, map[string]string{"error": "Not in the library"})
 		return
@@ -457,7 +459,7 @@ func libraryPrefetchHandler(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().Unix()
 
 	library.Lock()
-	lib := libraryLocked()
+	lib := userLib(libraryLocked(), currentUser(r).ID)
 	e := lib.Entries[key]
 	if e == nil {
 		e = &libraryEntry{InfoHash: hash, FileIndex: in.File, UpdatedAt: now}

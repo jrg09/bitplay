@@ -1335,6 +1335,43 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     });
   });
 
+  // Who is using the app (identity comes from Cloudflare Access); only
+  // admins get Settings
+  const userChip = document.querySelector("#user-chip");
+  const showUser = (me) => {
+    userChip.textContent = me.name;
+    userChip.title = me.email + " - click to change your display name";
+    userChip.classList.remove("hidden");
+    document.querySelector("#settings-btn").classList.toggle("hidden", !me.admin);
+  };
+  fetch("/api/v1/me")
+    .then((r) => r.json())
+    .then(showUser)
+    .catch(() => {});
+  userChip.addEventListener("click", async () => {
+    const name = window.prompt("Your display name", userChip.textContent);
+    if (!name || !name.trim() || name.trim() === userChip.textContent) {
+      return;
+    }
+    const res = await fetch("/api/v1/me", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (res && res.ok) {
+      showUser(data);
+    } else {
+      butterup.toast({
+        message: data.error || "Could not save the name",
+        location: "top-right",
+        icon: true,
+        dismissable: true,
+        type: "error",
+      });
+    }
+  });
+
   document.querySelector("#settings-btn").addEventListener("click", () => {
     document.querySelector("#settings-model").classList.toggle("hidden");
   });

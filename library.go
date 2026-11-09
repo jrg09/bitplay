@@ -65,10 +65,101 @@ type libraryEntry struct {
 	UpdatedAt   int64   `json:"updatedAt"`
 }
 
+// userLibrary is one person's history: where they stopped in each file and
+// their series progress (shows.go).
+type userLibrary struct {
+	Entries map[string]*libraryEntry `json:"entries"`
+	Shows   map[string]*showProgress `json:"shows,omitempty"`
+}
+
 type libraryData struct {
+	// shared: the same torrent is saved once, whoever opened it
 	Torrents map[string]*libraryTorrent `json:"torrents"`
-	Entries  map[string]*libraryEntry   `json:"entries"`
-	Shows    map[string]*showProgress   `json:"shows,omitempty"` // shows.go
+	Users    map[string]*userLibrary    `json:"users"`
+	// layout from before users existed; moved to the first admin on load
+	LegacyEntries map[string]*libraryEntry `json:"entries,omitempty"`
+	LegacyShows   map[string]*showProgress `json:"shows,omitempty"`
+}
+
+// userLib returns (creating it if needed) a user's history. Callers hold
+// library.Mutex.
+func userLib(lib *libraryData, id string) *userLibrary {
+	if lib.Users == nil {
+		lib.Users = map[string]*userLibrary{}
+	}
+	ul := lib.Users[id]
+	if ul == nil {
+		ul = &userLibrary{}
+		lib.Users[id] = ul
+	}
+	if ul.Entries == nil {
+		ul.Entries = map[string]*libraryEntry{}
+	}
+	if ul.Shows == nil {
+		ul.Shows = map[string]*showProgress{}
+	}
+	return ul
+}
+
+// fileHeldLocked: does any user still have this file in their history?
+func (lib *libraryData) fileHeldLocked(key string) bool {
+	for _, ul := range lib.Users {
+		if ul.Entries[key] != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// torrentHeldLocked: does any user still have any file of this torrent?
+func (lib *libraryData) torrentHeldLocked(hash string) bool {
+	for _, ul := range lib.Users {
+		for _, e := range ul.Entries {
+			if e.InfoHash == hash {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// migrateLegacyLocked gives history that has no real owner to the first
+// admin: the layout from before users existed, and what was recorded under
+// the single-user "local" id before admins were configured.
+func (lib *libraryData) migrateLegacyLocked() bool {
+	owner := firstAdminID()
+	changed := false
+
+	if len(lib.LegacyEntries) > 0 || len(lib.LegacyShows) > 0 {
+		ul := userLib(lib, owner)
+		for k, e := range lib.LegacyEntries {
+			ul.Entries[k] = e
+		}
+		for k, sp := range lib.LegacyShows {
+			ul.Shows[k] = sp
+		}
+		log.Printf("Library: moved %d file(s) and %d show(s) of history to %s", len(lib.LegacyEntries), len(lib.LegacyShows), owner)
+		changed = true
+	}
+	lib.LegacyEntries, lib.LegacyShows = nil, nil
+
+	if local := lib.Users[localUserID]; local != nil && owner != localUserID {
+		dst := userLib(lib, owner)
+		for k, e := range local.Entries {
+			if dst.Entries[k] == nil {
+				dst.Entries[k] = e
+			}
+		}
+		for k, sp := range local.Shows {
+			if dst.Shows[k] == nil {
+				dst.Shows[k] = sp
+			}
+		}
+		delete(lib.Users, localUserID)
+		log.Printf("Library: moved the single-user history to %s", owner)
+		changed = true
+	}
+	return changed
 }
 
 var library = struct {
@@ -96,11 +187,11 @@ func libraryLocked() *libraryData {
 		if library.data.Torrents == nil {
 			library.data.Torrents = map[string]*libraryTorrent{}
 		}
-		if library.data.Entries == nil {
-			library.data.Entries = map[string]*libraryEntry{}
+		if library.data.Users == nil {
+			library.data.Users = map[string]*userLibrary{}
 		}
-		if library.data.Shows == nil {
-			library.data.Shows = map[string]*showProgress{}
+		if library.data.migrateLegacyLocked() {
+			librarySaveLocked()
 		}
 	}
 	return library.data
@@ -251,11 +342,13 @@ func libraryStartFullDownload(hash string, idx int, session *TorrentSession, fil
 			fullDownloads.Unlock()
 
 			library.Lock()
-			if e := libraryLocked().Entries[key]; e != nil {
-				e.Downloaded = done
-				if complete && e.CompletedAt == 0 {
-					e.CompletedAt = time.Now().Unix()
-					librarySaveLocked()
+			for _, ul := range libraryLocked().Users {
+				if e := ul.Entries[key]; e != nil {
+					e.Downloaded = done
+					if complete && e.CompletedAt == 0 {
+						e.CompletedAt = time.Now().Unix()
+						librarySaveLocked()
+					}
 				}
 			}
 			library.Unlock()
@@ -323,29 +416,29 @@ func onDiskSize(rel string) int64 {
 	return 0
 }
 
-// libraryRemove deletes the entry and its file. When it was the last entry
-// of its torrent, the whole torrent folder and its saved metainfo go too.
-// Callers hold library.Mutex.
-func libraryRemoveLocked(key string) {
+// libraryRemoveLocked drops the entry from the user's history. The file is
+// shared, so it is only deleted from disk once nobody else has it; when it
+// was the last entry of its torrent, the whole torrent folder and its saved
+// metainfo go too. Callers hold library.Mutex.
+func libraryRemoveLocked(userID, key string) {
 	lib := libraryLocked()
-	e := lib.Entries[key]
+	ul := userLib(lib, userID)
+	e := ul.Entries[key]
 	if e == nil {
 		return
 	}
-	delete(lib.Entries, key)
+	delete(ul.Entries, key)
+	if lib.fileHeldLocked(key) {
+		librarySaveLocked()
+		return
+	}
 
 	// stop the session first so nothing is writing to the files
 	if v, ok := sessions.Load(e.InfoHash); ok {
 		teardownSession(e.InfoHash, v.(*TorrentSession))
 	}
 
-	remaining := false
-	for _, other := range lib.Entries {
-		if other.InfoHash == e.InfoHash {
-			remaining = true
-			break
-		}
-	}
+	remaining := lib.torrentHeldLocked(e.InfoHash)
 
 	target := e.RelPath
 	if !remaining {
@@ -381,10 +474,12 @@ func libraryJanitor() {
 	for ; ; <-ticker.C {
 		cutoff := time.Now().Add(-time.Duration(keepWatchedDays()) * 24 * time.Hour).Unix()
 		library.Lock()
-		for key, e := range libraryLocked().Entries {
-			if e.WatchedAt > 0 && e.WatchedAt < cutoff {
-				log.Printf("Library: %q was watched more than %d day(s) ago, deleting", e.FileName, keepWatchedDays())
-				libraryRemoveLocked(key)
+		for uid, ul := range libraryLocked().Users {
+			for key, e := range ul.Entries {
+				if e.WatchedAt > 0 && e.WatchedAt < cutoff {
+					log.Printf("Library: %q was watched more than %d day(s) ago by %s, removing it from their history", e.FileName, keepWatchedDays(), uid)
+					libraryRemoveLocked(uid, key)
+				}
 			}
 		}
 		library.Unlock()
@@ -439,7 +534,7 @@ func libraryProgressHandler(w http.ResponseWriter, r *http.Request) {
 	done := file.BytesCompleted()
 
 	library.Lock()
-	lib := libraryLocked()
+	lib := userLib(libraryLocked(), currentUser(r).ID)
 	e := lib.Entries[key]
 	if e == nil {
 		e = &libraryEntry{InfoHash: hash, FileIndex: in.File}
@@ -500,7 +595,7 @@ func libraryEntryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	library.Lock()
 	defer library.Unlock()
-	lib := libraryLocked()
+	lib := userLib(libraryLocked(), currentUser(r).ID)
 	if e := lib.Entries[libraryKey(hash, idx)]; e != nil {
 		respondWithJSON(w, http.StatusOK, e)
 		return
@@ -533,12 +628,13 @@ func libraryListHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	library.Lock()
-	lib := libraryLocked()
+	all := libraryLocked()
+	lib := userLib(all, currentUser(r).ID)
 	items := make([]libraryListItem, 0, len(lib.Entries))
 	linked := showLinkedFilesLocked(lib)
 	for key, e := range lib.Entries {
 		item := libraryListItem{libraryEntry: *e, Watched: e.WatchedAt > 0, Show: linked[key]}
-		if rec := lib.Torrents[e.InfoHash]; rec != nil {
+		if rec := all.Torrents[e.InfoHash]; rec != nil {
 			item.Magnet = rec.Magnet
 		}
 		if item.Magnet == "" {
@@ -582,13 +678,14 @@ func libraryDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := libraryKey(in.InfoHash, in.FileIndex)
+	uid := currentUser(r).ID
 	library.Lock()
 	defer library.Unlock()
-	if libraryLocked().Entries[key] == nil {
+	if userLib(libraryLocked(), uid).Entries[key] == nil {
 		respondWithJSON(w, http.StatusNotFound, map[string]string{"error": "Not in the library"})
 		return
 	}
-	libraryRemoveLocked(key)
+	libraryRemoveLocked(uid, key)
 	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Deleted"})
 }
 

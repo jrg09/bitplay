@@ -585,7 +585,7 @@ func seriesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	switch action {
 	case "":
-		sp, progress := showSnapshot(id)
+		sp, progress := showSnapshot(currentUser(r).ID, id)
 		respondWithJSON(w, http.StatusOK, map[string]interface{}{
 			"meta":     info.Meta,
 			"seasons":  info.Seasons,

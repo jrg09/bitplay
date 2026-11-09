@@ -173,11 +173,26 @@ Every browser on iOS/iPadOS is WebKit, and desktop Safari is too. They report su
 *   **Cost:** video is always re-encoded for these clients, so each playback uses CPU on the server (roughly 1 s of ffmpeg per 6 s segment for 1080p on a modern x86 CPU). Encodes share the `BITPLAY_MAX_REMUX` slots and the last 256 MB of segments are cached in memory.
 *   **Subtitles:** WebKit uses native text tracks, so subtitles appear in the iOS player's own menu.
 
+### Multiple users (Cloudflare Access)
+
+If BitPlay is published through a Cloudflare Tunnel protected by Cloudflare Access, every visitor can have their own account:
+
+*   **Private history:** "Continue watching", resume positions and series progress are stored per user (by the email Access verified). Torrent files on disk are shared, so something two people watched is downloaded once and only deleted when neither has it any more.
+*   **Display name:** shown in the header, derived from the email (`jorge.castro@…` becomes "Jorge Castro") and editable by clicking it.
+*   **Admins:** only the emails in `BITPLAY_ADMINS` see Settings, logs and sessions and can change them. Everyone shares those settings (proxy, indexers, OpenSubtitles).
+*   **Verification:** BitPlay validates Cloudflare's signed `Cf-Access-Jwt-Assertion` token (signature, issuer, audience, expiry) instead of trusting a header, so it can't be spoofed.
+*   **Direct access:** requests that don't come through Cloudflare (for example `http://server:3347` on your LAN, or ffmpeg on loopback) are treated as the **first admin**, with no login. Don't publish the port to the internet except through the tunnel. Anything that did cross Cloudflare but has no valid token is rejected.
+*   **Existing history** from before users existed, or recorded while no admin was configured, moves to the first admin the first time the app starts with `BITPLAY_ADMINS` set.
+
+Without `BITPLAY_CF_TEAM_DOMAIN` the app stays single-user, as before.
+
 ### Environment Variables
 
 | Variable | Description |
 | --- | --- |
 | `BITPLAY_AUTH_USERNAME` / `BITPLAY_AUTH_PASSWORD` | Set both to protect the entire app (UI, API, and video streams) with HTTP basic auth. Recommended for instances exposed to the internet. |
+| `BITPLAY_CF_TEAM_DOMAIN` / `BITPLAY_CF_AUD` | Turn on per-user accounts: your Access team domain (e.g. `myteam.cloudflareaccess.com`) and the application's AUD tag (Zero Trust → Access → Applications → your app → Overview). Set both. See [Multiple users](#multiple-users-cloudflare-access). |
+| `BITPLAY_ADMINS` | Comma separated emails allowed to change settings and see logs. The first one also owns pre-existing history and direct (non-Cloudflare) access. |
 | `BITPLAY_MAX_REMUX` | Maximum concurrent ffmpeg jobs: remux streams and Safari/iOS HLS segment encodes (default `3`). |
 
 Example with Docker Compose:

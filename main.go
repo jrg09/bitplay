@@ -527,6 +527,7 @@ func main() {
 	// Set up endpoint handlers
 	http.HandleFunc("/api/v1/torrent/add", addTorrentHandler)
 	http.HandleFunc("/api/v1/torrent/", torrentHandler)
+	http.HandleFunc("/api/v1/me", meHandler)
 	http.HandleFunc("/api/v1/settings", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			settingsMutex.RLock()
@@ -550,18 +551,25 @@ func main() {
 			resp.JackettApiKey = ""
 			resp.OpenSubtitlesApiKey = ""
 			resp.OpenSubtitlesPassword = ""
+			if !currentUser(r).Admin {
+				// everyone needs the feature flags, only admins the endpoints
+				resp.ProxyURL = ""
+				resp.ProwlarrHost = ""
+				resp.JackettHost = ""
+				resp.OpenSubtitlesUsername = ""
+			}
 			respondWithJSON(w, http.StatusOK, resp)
 		} else {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-	http.HandleFunc("/api/v1/settings/proxy", saveProxySettingsHandler)
-	http.HandleFunc("/api/v1/settings/prowlarr", saveProwlarrSettingsHandler)
-	http.HandleFunc("/api/v1/settings/jackett", saveJackettSettingsHandler)
-	http.HandleFunc("/api/v1/settings/subtitles", saveSubtitleSettingsHandler)
+	http.HandleFunc("/api/v1/settings/proxy", requireAdmin(saveProxySettingsHandler))
+	http.HandleFunc("/api/v1/settings/prowlarr", requireAdmin(saveProwlarrSettingsHandler))
+	http.HandleFunc("/api/v1/settings/jackett", requireAdmin(saveJackettSettingsHandler))
+	http.HandleFunc("/api/v1/settings/subtitles", requireAdmin(saveSubtitleSettingsHandler))
 	http.HandleFunc("/api/v1/subtitles/auto", subtitlesAutoHandler)
 	http.HandleFunc("/api/v1/subtitles/file/", subtitleFileHandler)
-	http.HandleFunc("/api/v1/subtitles/test", testSubtitleConnectionHandler)
+	http.HandleFunc("/api/v1/subtitles/test", requireAdmin(testSubtitleConnectionHandler))
 	http.HandleFunc("/api/v1/library", libraryListHandler)
 	http.HandleFunc("/api/v1/library/entry", libraryEntryHandler)
 	http.HandleFunc("/api/v1/library/progress", libraryProgressHandler)
@@ -569,21 +577,21 @@ func main() {
 	http.HandleFunc("/api/v1/library/shows", libraryShowsHandler)
 	http.HandleFunc("/api/v1/library/shows/hide", libraryShowHideHandler)
 	http.HandleFunc("/api/v1/library/prefetch", libraryPrefetchHandler)
-	http.HandleFunc("/api/v1/settings/library", saveLibrarySettingsHandler)
+	http.HandleFunc("/api/v1/settings/library", requireAdmin(saveLibrarySettingsHandler))
 	http.HandleFunc("/api/v1/search", torrentSearchHandler)
 	http.HandleFunc("/api/v1/featured", featuredHandler)
 	http.HandleFunc("/api/v1/catalog", streamingCatalogHandler)
 	http.HandleFunc("/api/v1/series/", seriesHandler)
-	http.HandleFunc("/api/v1/settings/search", savePublicSearchSettingsHandler)
+	http.HandleFunc("/api/v1/settings/search", requireAdmin(savePublicSearchSettingsHandler))
 	http.HandleFunc("/api/v1/prowlarr/search", searchFromProwlarr)
 	http.HandleFunc("/api/v1/jackett/search", searchFromJackett)
-	http.HandleFunc("/api/v1/prowlarr/test", testProwlarrConnection)
-	http.HandleFunc("/api/v1/jackett/test", testJackettConnection)
-	http.HandleFunc("/api/v1/proxy/test", testProxyConnection)
+	http.HandleFunc("/api/v1/prowlarr/test", requireAdmin(testProwlarrConnection))
+	http.HandleFunc("/api/v1/jackett/test", requireAdmin(testJackettConnection))
+	http.HandleFunc("/api/v1/proxy/test", requireAdmin(testProxyConnection))
 	http.HandleFunc("/api/v1/torrent/convert", convertTorrentToMagnetHandler)
-	http.HandleFunc("/api/v1/logs", logsHandler)
-	http.HandleFunc("/api/v1/sessions", sessionsHandler)
-	http.HandleFunc("/api/v1/cache/purge", purgeCacheHandler)
+	http.HandleFunc("/api/v1/logs", requireAdmin(logsHandler))
+	http.HandleFunc("/api/v1/sessions", requireAdmin(sessionsHandler))
+	http.HandleFunc("/api/v1/cache/purge", requireAdmin(purgeCacheHandler))
 	http.HandleFunc("/api/v1/capabilities", capabilitiesHandler)
 
 	// Set up client file serving
@@ -611,7 +619,7 @@ func main() {
 	// Create a server with graceful shutdown
 	server := &http.Server{
 		Addr: addr,
-		Handler: basicAuthMiddleware(http.DefaultServeMux),
+		Handler: basicAuthMiddleware(identityMiddleware(http.DefaultServeMux)),
 	}
 
 	// Start the server in a goroutine

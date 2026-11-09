@@ -47,7 +47,7 @@ func TestFindNextEpisode(t *testing.T) {
 }
 
 func TestShowRecordProgress(t *testing.T) {
-	lib := &libraryData{Entries: map[string]*libraryEntry{}, Shows: map[string]*showProgress{}}
+	lib := &userLibrary{Entries: map[string]*libraryEntry{}, Shows: map[string]*showProgress{}}
 	ref := &seriesRef{IMDb: "tt0903747", Title: "Breaking Bad", Poster: "https://img/p.jpg", Season: 1, Episode: 2}
 	e := &libraryEntry{InfoHash: "aa", FileIndex: 3, FileName: "x.mkv", Position: 600, Duration: 2700}
 	showRecordProgressLocked(lib, ref, e)
