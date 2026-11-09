@@ -24,6 +24,15 @@ Tests are plain `go test`, no network or ffmpeg required (ffmpeg arguments are b
 | `torrentsearch.go` | Built-in search over YTS / TPB / EZTV |
 | `subtitles.go` | OpenSubtitles lookup |
 | `client/assets/index.js` | All UI logic, including playback source selection (`pickSource`) |
+| `client/assets/app.css` | Page layout (top bar, rows, poster grid, sheets, player overlay). Plain CSS on the theme variables, no build step |
+
+## Page layout
+
+*   Sticky top bar (logo, search/magnet box, "+" for a `.torrent`, theme, user name, Settings).
+*   **Home** (`#home`): "Continue watching" cards, then one poster row per list (`HOME_ROWS` in `index.js`; each row loads when it nears the viewport). **Search** replaces it (`body.bp-searching`) with a poster grid.
+*   Clicking a poster opens a **sheet** (`#featured-detail` for torrents, `#series-view` for episodes, `#add-sheet`) over a shared backdrop; Esc or the backdrop closes it. `closeSheets()` closes all of them.
+*   Playback runs in the full screen **player overlay** (`#player-overlay`, stage `#player-stage`); "Back" disposes the player (`closePlayerOverlay`). New UI that must appear above the video goes in `#player-stage`.
+*   New CSS goes in `app.css` with `bp-*` classes. `output.css` is a prebuilt Tailwind file: a Tailwind utility only works if it is already in it, otherwise rebuild with `pnpm build`.
 
 ## Playback pipeline
 

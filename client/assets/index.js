@@ -332,8 +332,8 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
     row.append(copyBtn, vlcLink);
     panel.append(msg, row);
-    document.querySelector("main").appendChild(panel);
-    panel.scrollIntoView({ behavior: "smooth" });
+    openPlayerOverlay();
+    document.querySelector("#player-stage").appendChild(panel);
   };
 
   // Remux streams can't byte-range seek; out-of-buffer seeks restart
@@ -594,7 +594,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       el.className = "w-full text-sm text-muted-foreground mt-4";
     }
     // the player is re-created per playback, keep this right under it
-    document.querySelector("main").appendChild(el);
+    document.querySelector("#player-stage").appendChild(el);
     return el;
   };
 
@@ -787,20 +787,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     return btn;
   };
 
-  // one downloaded / in-progress file
-  const buildLibraryRow = (it) => {
-    // names come from torrents: untrusted, so textContent only
-    const row = document.createElement("div");
-    row.className = "flex items-center gap-3 p-3 border-b";
-
-    const info = document.createElement("div");
-    info.className = "flex flex-col gap-1 flex-1 min-w-0";
-    const title = document.createElement("span");
-    title.className = "text-sm font-semibold";
-    title.style.cssText = ellipsis;
-    title.textContent = it.fileName || it.title;
-    title.title = it.title;
-
+  const fileStatus = (it) => {
     const pct = it.size ? Math.floor((it.downloaded / it.size) * 100) : 0;
     const parts = [];
     if (it.watched) {
@@ -815,9 +802,30 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     } else {
       parts.push(pct ? `${pct}% on disk` : "Not on disk");
     }
+    return {
+      text: parts.join(" · "),
+      ratio: it.duration ? Math.min(1, it.position / it.duration) : 0,
+    };
+  };
+
+  // one downloaded / in-progress file
+  const buildLibraryRow = (it) => {
+    // names come from torrents: untrusted, so textContent only
+    const row = document.createElement("div");
+    row.className = "flex items-center gap-3 p-3 border-b";
+
+    const info = document.createElement("div");
+    info.className = "flex flex-col gap-1 flex-1 min-w-0";
+    const title = document.createElement("span");
+    title.className = "text-sm font-semibold";
+    title.style.cssText = ellipsis;
+    title.textContent = it.fileName || it.title;
+    title.title = it.title;
+
+    const status = fileStatus(it);
     const meta = document.createElement("span");
     meta.className = "text-xs text-muted-foreground";
-    meta.textContent = parts.join(" · ");
+    meta.textContent = status.text;
 
     const bar = document.createElement("div");
     bar.className = "bg-muted rounded-full overflow-hidden";
@@ -825,8 +833,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     const fill = document.createElement("div");
     fill.className = "bg-primary";
     fill.style.height = "100%";
-    fill.style.width =
-      (it.duration ? Math.min(100, (it.position / it.duration) * 100) : 0) + "%";
+    fill.style.width = status.ratio * 100 + "%";
     bar.appendChild(fill);
     info.append(title, meta, bar);
 
@@ -859,6 +866,92 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     return row;
   };
 
+  // what the main button of a series does: resume, next episode or browse
+  const showAction = (show, meta) => {
+    const next = show.next;
+    if (next?.resume && show.resumeMagnet) {
+      return {
+        label: "Continue",
+        run: () => {
+          document.querySelector("#magnet").value = show.resumeMagnet;
+          startPlayback({
+            fileIndex: show.resumeFile,
+            episode: { ...meta, season: next.season, episode: next.episode },
+          });
+        },
+      };
+    }
+    return {
+      label: next ? "Next episode" : "Episodes",
+      run: () =>
+        openSeries(meta, next ? { season: next.season, episode: next.episode } : null),
+    };
+  };
+
+  const nextLabel = (next) =>
+    next
+      ? `${next.resume ? "Continue" : "Next"}: ${episodeCode(next.season, next.episode)} · ${next.name}${
+          next.aired ? "" : " (not aired yet)"
+        }`
+      : "All caught up";
+
+  // Continue watching: a card per series or loose file, with one action
+  const buildContinueCard = (entry) => {
+    const card = document.createElement("div");
+    card.className = "bp-card";
+    const posterBox = document.createElement("div");
+    posterBox.className = "bp-card-poster";
+    const body = document.createElement("div");
+    body.className = "bp-card-body";
+    const title = document.createElement("span");
+    title.className = "bp-card-title";
+    const sub = document.createElement("span");
+    sub.className = "bp-card-sub";
+    const actions = document.createElement("div");
+    actions.className = "bp-card-actions";
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "btn small";
+
+    if (entry.show) {
+      const show = entry.show;
+      const meta = { imdb: show.imdb, title: show.title, poster: show.poster, type: "series" };
+      const action = showAction(show, meta);
+      posterBox.appendChild(buildPoster(meta, 64, 96));
+      title.textContent = show.title;
+      sub.textContent = nextLabel(show.next);
+      sub.title = sub.textContent;
+      go.textContent = action.label;
+      go.addEventListener("click", action.run);
+      actions.append(go);
+      body.append(title, sub, actions);
+    } else {
+      const it = entry.file;
+      const status = fileStatus(it);
+      const ph = document.createElement("div");
+      ph.className = "bp-placeholder";
+      ph.textContent = "\u25B6";
+      posterBox.appendChild(ph);
+      title.textContent = it.fileName || it.title;
+      title.title = it.title;
+      sub.textContent = status.text;
+      const bar = document.createElement("div");
+      bar.className = "bp-progress";
+      const fill = document.createElement("div");
+      fill.style.width = status.ratio * 100 + "%";
+      bar.appendChild(fill);
+      go.textContent = it.watched ? "Watch again" : "Continue";
+      go.addEventListener("click", () => {
+        document.querySelector("#magnet").value = it.magnet;
+        startPlayback({ fileIndex: it.fileIndex });
+      });
+      actions.append(go);
+      body.append(title, sub, bar, actions);
+    }
+    card.append(posterBox, body);
+    return card;
+  };
+
   // one series: its next episode, plus its files folded underneath
   const buildShowRow = (show, files) => {
     const meta = { imdb: show.imdb, title: show.title, poster: show.poster, type: "series" };
@@ -879,11 +972,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     sub.className = "text-xs text-muted-foreground";
     sub.style.cssText = ellipsis;
     const next = show.next;
-    sub.textContent = next
-      ? `${next.resume ? "Continue" : "Next"}: ${episodeCode(next.season, next.episode)} · ${next.name}${
-          next.aired ? "" : " (not aired yet)"
-        }`
-      : "All caught up";
+    sub.textContent = nextLabel(next);
     info.append(title, sub);
 
     const buttons = document.createElement("div");
@@ -891,21 +980,9 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     const main = document.createElement("button");
     main.type = "button";
     main.className = "btn small shrink-0";
-    if (next?.resume && show.resumeMagnet) {
-      main.textContent = "Continue";
-      main.addEventListener("click", () => {
-        document.querySelector("#magnet").value = show.resumeMagnet;
-        startPlayback({
-          fileIndex: show.resumeFile,
-          episode: { ...meta, season: next.season, episode: next.episode },
-        });
-      });
-    } else {
-      main.textContent = next ? "Next episode" : "Episodes";
-      main.addEventListener("click", () =>
-        openSeries(meta, next ? { season: next.season, episode: next.episode } : null)
-      );
-    }
+    const action = showAction(show, meta);
+    main.textContent = action.label;
+    main.addEventListener("click", action.run);
     buttons.appendChild(main);
     if (main.textContent !== "Episodes") {
       const eps = document.createElement("button");
@@ -953,6 +1030,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
   const renderLibrary = async () => {
     const wrapper = document.querySelector("#library-wrapper");
     const list = document.querySelector("#library-list");
+    const cards = document.querySelector("#library-row");
     const getJSON = (url) =>
       fetch(url)
         .then((res) => (res.ok ? res.json() : []))
@@ -964,6 +1042,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     items = Array.isArray(items) ? items : [];
     shows = Array.isArray(shows) ? shows : [];
     list.innerHTML = "";
+    cards.innerHTML = "";
     if (!items.length && !shows.length) {
       wrapper.classList.add("hidden");
       return;
@@ -976,12 +1055,20 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       ...shows.map((s) => ({
         at: s.updatedAt,
         el: () => buildShowRow(s, items.filter((it) => it.show === s.imdb)),
+        card: () => buildContinueCard({ show: s }),
       })),
       ...items
         .filter((it) => !shown.has(it.show))
-        .map((it) => ({ at: it.updatedAt, el: () => buildLibraryRow(it) })),
+        .map((it) => ({
+          at: it.updatedAt,
+          el: () => buildLibraryRow(it),
+          card: () => buildContinueCard({ file: it }),
+        })),
     ].sort((a, b) => b.at - a.at);
-    rows.forEach((r) => list.appendChild(r.el()));
+    rows.forEach((r) => {
+      cards.appendChild(r.card());
+      list.appendChild(r.el());
+    });
     list.lastElementChild?.classList.remove("border-b");
   };
   renderLibrary();
@@ -1036,9 +1123,9 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       player = null;
       const vidElm = document.createElement("video");
       vidElm.setAttribute("id", "video-player");
-      vidElm.setAttribute("class", "video-js mt-10 w-full");
+      vidElm.setAttribute("class", "video-js");
 
-      document.querySelector("main").appendChild(vidElm);
+      document.querySelector("#player-stage").appendChild(vidElm);
     }
 
     form
@@ -1194,6 +1281,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       return;
     }
 
+    openPlayerOverlay();
     player = videojs(
       "video-player",
       {
@@ -1260,19 +1348,8 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
     document.querySelector("#video-player").style.display = "block";
 
-    // the video element is re-created per playback, move the control with it
-    const subtitleUploadWrapper = document.querySelector(
-      "#subtitle-upload-wrapper"
-    );
-    document.querySelector("main").appendChild(subtitleUploadWrapper);
-    subtitleUploadWrapper.classList.remove("hidden");
-    // scroll to video player
+    document.querySelector("#subtitle-upload-wrapper").classList.remove("hidden");
     setTimeout(() => {
-      window.scrollTo({
-        top: document.body.scrollHeight,
-        behavior: "smooth",
-      });
-
       if (videoFiles.length > 1) {
         const videoSelect = document.createElement("select");
         videoSelect.setAttribute("id", "video-select");
@@ -1342,6 +1419,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     userChip.textContent = me.name;
     userChip.title = me.email + " - click to change your display name";
     userChip.classList.remove("hidden");
+    document.querySelector("#greeting").textContent = "Hola, " + me.name;
     document.querySelector("#settings-btn").classList.toggle("hidden", !me.admin);
   };
   fetch("/api/v1/me")
@@ -1545,7 +1623,8 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
   let searchData = [];
   let searchPage = 1;
-  let searchPageSize = 5; // title groups per page
+  let searchPageSize = 24; // title groups per page
+  let searchQuery = "";
   // the search box doubles as the magnet box, so it is always visible
   const updateSearchVisibility = () => {
     searchWrapper.classList.remove("hidden");
@@ -1565,6 +1644,34 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
   };
 
   const ellipsis = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+
+  // The player covers the page while something plays; "Back" tears it down
+  const playerOverlay = document.querySelector("#player-overlay");
+  const openPlayerOverlay = () => {
+    playerOverlay.classList.remove("hidden");
+    document.body.classList.add("bp-noscroll");
+  };
+  const closePlayerOverlay = () => {
+    nextEpisodeToken++;
+    document.querySelector("#next-episode")?.remove();
+    document.querySelector("#download-status")?.remove();
+    removeExternalPanel();
+    if (player) {
+      stopTracking();
+      player.dispose();
+      player = null;
+      const vidElm = document.createElement("video");
+      vidElm.setAttribute("id", "video-player");
+      vidElm.setAttribute("class", "video-js");
+      document.querySelector("#player-stage").appendChild(vidElm);
+    }
+    document.querySelector("#audio-select")?.remove();
+    document.querySelector("#subtitle-upload-wrapper").classList.add("hidden");
+    playerOverlay.classList.add("hidden");
+    document.body.classList.toggle("bp-noscroll", sheetOpen());
+    // positions changed while watching
+    renderLibrary();
+  };
 
   const buildPoster = (meta, width = 70, height = 104) => {
     const box = document.createElement("div");
@@ -1788,18 +1895,51 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     return list;
   };
 
-  const buildGroupCard = (group, isLast) => {
-    const meta = group.meta;
-    const card = document.createElement("div");
-    card.className = "flex gap-3 p-3" + (isLast ? "" : " border-b");
-    if (meta) {
-      card.appendChild(buildPoster(meta));
+  // a poster with the title and year/rating under it; badge = small count
+  const buildTitleTile = (meta, onClick, badge) => {
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = "bp-tile";
+    tile.title = meta.title || "";
+    const poster = document.createElement("div");
+    poster.className = "bp-poster";
+    const fallback = document.createElement("div");
+    fallback.className = "bp-placeholder";
+    fallback.textContent = meta.title || "";
+    poster.appendChild(fallback);
+    if (meta.poster && meta.poster.startsWith("https://")) {
+      const img = document.createElement("img");
+      img.src = meta.poster;
+      img.alt = "";
+      img.loading = "lazy";
+      img.referrerPolicy = "no-referrer";
+      img.addEventListener("error", () => img.remove());
+      poster.appendChild(img);
     }
-    const body = document.createElement("div");
-    body.className = "flex flex-col gap-2 flex-1 min-w-0";
-    body.append(buildMetaHeader(meta), buildTorrentList(group.results || [], GROUP_TORRENTS_SHOWN, {}, meta));
-    card.appendChild(body);
-    return card;
+    if (badge) {
+      const count = document.createElement("span");
+      count.className = "bp-count";
+      count.textContent = badge;
+      poster.appendChild(count);
+    }
+    const name = document.createElement("span");
+    name.className = "bp-tile-title";
+    name.textContent = meta.title || "";
+    const sub = document.createElement("span");
+    sub.className = "bp-tile-sub";
+    sub.textContent = [meta.year, meta.rating ? `\u2605 ${meta.rating}` : ""]
+      .filter(Boolean)
+      .join(" \u00b7 ");
+    tile.append(poster, name, sub);
+    tile.addEventListener("click", onClick);
+    return tile;
+  };
+
+  // a search result: the title's poster, click for its torrents
+  const buildSearchTile = (group) => {
+    const meta = group.meta || { title: "Other results" };
+    const n = (group.results || []).length;
+    return buildTitleTile(meta, () => showFeaturedDetail(group), `${n} torrent${n === 1 ? "" : "s"}`);
   };
 
   const updateSearchResults = () => {
@@ -1807,6 +1947,9 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     const container = document.querySelector("#search-groups");
     const empty = document.querySelector("#search-empty");
     searchResults.classList.remove("hidden");
+    document.body.classList.add("bp-searching");
+    document.querySelector("#results-title").textContent =
+      `${searchData.length} title${searchData.length === 1 ? "" : "s"} for \u201c${searchQuery}\u201d`;
     container.innerHTML = "";
     empty.classList.toggle("hidden", searchData.length > 0);
     if (searchData.length === 0) {
@@ -1816,10 +1959,8 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
     const start = (searchPage - 1) * searchPageSize;
     const page = searchData.slice(start, start + searchPageSize);
-    page.forEach((group, i) =>
-      container.appendChild(buildGroupCard(group, i === page.length - 1))
-    );
-    searchResults.scrollTop = 0;
+    page.forEach((group) => container.appendChild(buildSearchTile(group)));
+    window.scrollTo({ top: 0 });
 
     generatePagination(
       searchPage,
@@ -1876,10 +2017,10 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
   };
 
   const searchManually = (query) => {
+    closeSheets();
     document.querySelector("#search").value = query;
     document.querySelector("#search-category").value = "tv";
     document.querySelector("#search-form").requestSubmit();
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const markEpisodes = async (season, episode, watched) => {
@@ -2105,7 +2246,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         });
         bar.appendChild(btn);
       }
-      document.querySelector("main").appendChild(bar);
+      document.querySelector("#player-stage").appendChild(bar);
     };
 
     const onTime = () => {
@@ -2439,7 +2580,6 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
     view.append(close, head, list);
     view.classList.remove("hidden");
-    view.scrollIntoView({ behavior: "smooth", block: "start" });
 
     try {
       const res = await fetch(`/api/v1/series/${meta.imdb}`);
@@ -2500,12 +2640,10 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
   };
 
   // Featured titles (server: featured.go) and streaming catalogs (server:
-  // catalogs.go): tabs + poster grid; clicking a poster opens its torrents to
+  // catalogs.go): rows of posters; clicking a poster opens its torrents to
   // pick one. Catalog titles come without torrents, so they are searched on
   // open. Lists are cached per page load.
   const featuredLoaded = {};
-  let featuredActive = null;
-  let streamType = "movie";
   let featuredDetailToken = 0;
 
   const torrentsForTitle = async (meta) => {
@@ -2549,7 +2687,6 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
     detail.append(close, row);
     detail.classList.remove("hidden");
-    detail.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
     if (!group.results?.length && !group.searched && group.meta?.imdb) {
       const note = document.createElement("p");
@@ -2582,99 +2719,165 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
 
   const buildFeaturedTile = (group) => {
     const meta = group.meta || {};
-    const tile = document.createElement("button");
-    tile.type = "button";
-    tile.className = "flex flex-col gap-2 cursor-pointer";
-    tile.style.cssText =
-      "text-align:left;min-width:0;background:none;border:0;padding:0";
-    tile.title = meta.title || "";
-
-    const poster = buildPoster(meta);
-    poster.style.cssText = "width:100%;aspect-ratio:2/3";
-
-    const name = document.createElement("span");
-    name.className = "text-sm font-semibold";
-    name.style.cssText = ellipsis;
-    name.textContent = meta.title || "";
-
-    const sub = document.createElement("span");
-    sub.className = "text-xs text-muted-foreground";
-    sub.textContent = [meta.year, meta.rating ? `★ ${meta.rating}` : ""]
-      .filter(Boolean)
-      .join(" · ");
-
-    tile.append(poster, name, sub);
-    tile.addEventListener("click", () =>
+    return buildTitleTile(meta, () =>
       meta.type === "series" && /^tt\d+$/.test(meta.imdb || "")
         ? openSeries(meta)
         : showFeaturedDetail(group)
     );
-    return tile;
   };
 
-  const markActive = (selector, attr, value) =>
-    document.querySelectorAll(selector).forEach((b) => {
-      const on = b.dataset[attr] === value;
-      b.classList.toggle("bg-primary", on);
-      b.classList.toggle("text-primary-foreground", on);
-      b.classList.toggle("bg-muted", !on);
-    });
+  // Home rows: popular lists and one row per streaming service and type.
+  // Each loads when it nears the viewport, so opening the page doesn't fire
+  // a dozen requests at once.
+  const STREAMING = [
+    ["nfx", "Netflix"],
+    ["nfx-top", "Netflix Top 10"],
+    ["hbm", "HBO Max"],
+    ["dnp", "Disney+"],
+    ["amp", "Prime Video"],
+    ["atp", "Apple TV+"],
+  ];
+  const HOME_ROWS = [
+    { id: "popular", title: "Popular" },
+    { id: "recent", title: "Recently added" },
+    { id: "top-movies", title: "Top movies" },
+    { id: "top-tv", title: "Top TV" },
+    ...STREAMING.flatMap(([id, name]) => [
+      { id: `stream:${id}`, type: "movie", title: `${name} \u00b7 Movies` },
+      { id: `stream:${id}`, type: "series", title: `${name} \u00b7 Series` },
+    ]),
+  ];
 
-  // id: a featured list ("popular"...) or "stream:<service>" (uses streamType)
-  const loadFeaturedList = async (id) => {
-    const isStream = id.startsWith("stream:");
-    const key = isStream ? `${id}/${streamType}` : id;
-    featuredActive = key;
-    featuredDetailToken++;
-    markActive(".featured-tab", "list", id);
-    markActive(".stream-type", "type", isStream ? streamType : "");
-    document.querySelector("#featured-detail").classList.add("hidden");
-    const grid = document.querySelector("#featured-grid");
-    const status = document.querySelector("#featured-status");
-    grid.innerHTML = "";
-
-    let groups = featuredLoaded[key];
-    if (!groups) {
-      status.textContent = "Loading…";
+  const fetchHomeRow = async (def) => {
+    const isStream = def.id.startsWith("stream:");
+    const key = isStream ? `${def.id}/${def.type}` : def.id;
+    if (!featuredLoaded[key]) {
       const url = isStream
-        ? `/api/v1/catalog?service=${encodeURIComponent(id.slice(7))}&type=${streamType}`
-        : `/api/v1/featured?list=${encodeURIComponent(id)}`;
-      try {
-        const res = await fetch(url);
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(data.error || "Could not load this list");
-        }
-        groups = Array.isArray(data.groups) ? data.groups : [];
-        featuredLoaded[key] = groups;
-      } catch (err) {
-        if (featuredActive === key) {
-          status.textContent = err.message;
-        }
-        return;
+        ? `/api/v1/catalog?service=${encodeURIComponent(def.id.slice(7))}&type=${def.type}`
+        : `/api/v1/featured?list=${encodeURIComponent(def.id)}`;
+      const res = await fetch(url);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Could not load this list");
       }
+      featuredLoaded[key] = Array.isArray(data.groups) ? data.groups : [];
     }
-    if (featuredActive !== key) {
-      return; // another tab was picked while this one loaded
-    }
-    status.textContent = groups.length ? "" : "Nothing to show right now";
-    groups.forEach((g) => grid.appendChild(buildFeaturedTile(g)));
+    return featuredLoaded[key];
   };
 
-  document.querySelectorAll(".featured-tab").forEach((b) =>
-    b.addEventListener("click", () => loadFeaturedList(b.dataset.list))
-  );
-  document.querySelectorAll(".stream-type").forEach((b) =>
-    b.addEventListener("click", () => {
-      streamType = b.dataset.type;
-      // keep the current service, or default to Netflix
-      const active = featuredActive || "";
-      loadFeaturedList(
-        active.startsWith("stream:") ? active.split("/")[0] : "stream:nfx"
-      );
+  const buildHomeRows = () => {
+    const container = document.querySelector("#home-rows");
+    const observer =
+      "IntersectionObserver" in window
+        ? new IntersectionObserver(
+            (entries) =>
+              entries.forEach((entry) => {
+                if (entry.isIntersecting) {
+                  observer.unobserve(entry.target);
+                  entry.target.__load();
+                }
+              }),
+            { rootMargin: "600px 0px" }
+          )
+        : null;
+
+    HOME_ROWS.forEach((def) => {
+      const section = document.createElement("section");
+      section.className = "bp-section";
+      const heading = document.createElement("h2");
+      heading.className = "bp-h";
+      heading.textContent = def.title;
+      const row = document.createElement("div");
+      row.className = "bp-row";
+      for (let i = 0; i < 8; i++) {
+        const sk = document.createElement("div");
+        sk.className = "bp-row-skeleton";
+        row.appendChild(sk);
+      }
+      section.append(heading, row);
+      container.appendChild(section);
+      section.__load = async () => {
+        try {
+          const groups = await fetchHomeRow(def);
+          if (!groups.length) {
+            section.remove();
+            return;
+          }
+          row.innerHTML = "";
+          groups.forEach((g) => row.appendChild(buildFeaturedTile(g)));
+        } catch (err) {
+          // a list that can't load just disappears, the others are fine
+          console.warn(`${def.title}: ${err.message}`);
+          section.remove();
+        }
+      };
+      if (observer) {
+        observer.observe(section);
+      } else {
+        section.__load();
+      }
+    });
+  };
+  buildHomeRows();
+
+  // Detail sheets (title, series, open file) share one backdrop; the player
+  // overlay sits above them
+  const SHEETS = ["#featured-detail", "#series-view", "#add-sheet"];
+  const sheetOpen = () =>
+    SHEETS.some((sel) => !document.querySelector(sel).classList.contains("hidden"));
+  const syncBackdrop = () => {
+    const open = sheetOpen();
+    document.querySelector("#bp-backdrop").classList.toggle("hidden", !open);
+    document.body.classList.toggle(
+      "bp-noscroll",
+      open || !playerOverlay.classList.contains("hidden")
+    );
+  };
+  const sheetObserver = new MutationObserver(syncBackdrop);
+  SHEETS.forEach((sel) =>
+    sheetObserver.observe(document.querySelector(sel), {
+      attributes: true,
+      attributeFilter: ["class"],
     })
   );
-  loadFeaturedList("popular");
+  const closeSheets = () => {
+    closeSeries();
+    featuredDetailToken++;
+    document.querySelector("#featured-detail").classList.add("hidden");
+    document.querySelector("#add-sheet").classList.add("hidden");
+  };
+  document.querySelector("#bp-backdrop").addEventListener("click", closeSheets);
+  document
+    .querySelectorAll("[data-close-sheet]")
+    .forEach((b) => b.addEventListener("click", closeSheets));
+  document.querySelector("#add-btn").addEventListener("click", () => {
+    document.querySelector("#add-sheet").classList.remove("hidden");
+  });
+  document.querySelector("#player-close").addEventListener("click", closePlayerOverlay);
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !document.querySelector("#settings-model").classList.contains("hidden")) {
+      return;
+    }
+    if (!playerOverlay.classList.contains("hidden")) {
+      closePlayerOverlay();
+    } else if (sheetOpen()) {
+      closeSheets();
+    }
+  });
+
+  // back to the home rows
+  const goHome = () => {
+    document.body.classList.remove("bp-searching");
+    document.querySelector("#search-result").classList.add("hidden");
+    document.querySelector("#search").value = "";
+    closeSheets();
+    window.scrollTo({ top: 0 });
+  };
+  document.querySelector("#back-home").addEventListener("click", goHome);
+  document.querySelector("#bp-logo").addEventListener("click", (e) => {
+    e.preventDefault();
+    goHome();
+  });
 
   document.querySelector("#search-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -2718,7 +2921,12 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     e.target.querySelector("button[type=submit]").innerHTML = "";
     const searchResults = document.querySelector("#search-result");
 
-    searchResults.classList.add("hidden");
+    searchQuery = query;
+    document.body.classList.add("bp-searching");
+    searchResults.classList.remove("hidden");
+    document.querySelector("#search-groups").innerHTML = "";
+    document.querySelector("#search-empty").classList.add("hidden");
+    document.querySelector("#results-title").textContent = "Searching\u2026";
     document.querySelector("#search-pagination").classList.add("hidden");
 
     // public sources + Prowlarr/Jackett, merged server side
@@ -2757,6 +2965,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       })
       .catch((error) => {
         console.error("There was a problem with the fetch operation:", error);
+        document.querySelector("#results-title").textContent = "Search failed";
         butterup.toast({
           message: error.message || "Failed to fetch search results",
           location: "top-right",
@@ -3359,6 +3568,7 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       })
       .then((data) => {
         document.querySelector("#magnet").value = data.magnet;
+        closeSheets();
         startPlayback();
       })
       .catch((error) => {

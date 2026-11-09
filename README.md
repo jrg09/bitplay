@@ -8,6 +8,7 @@ BitPlay is a web application built with Go that allows you to stream video conte
 
 *   **Direct Torrent Streaming:** Stream video files from magnet links or torrent files directly without needing to download them completely first.
 *   **MKV & Audio Track Support:** MKV files are remuxed on the fly with ffmpeg (no re-encoding), and files with multiple audio tracks get a track picker. If a codec genuinely can't play in your browser, BitPlay tells you which one and gives you the stream URL to open in VLC or mpv instead.
+*   **Streaming-style UI:** a sticky top bar with search, a home page of poster rows (continue watching, popular, recently added, top lists and one row per streaming service), a poster grid for search results, details in a sheet over the page and a full screen player. Works on phones.
 *   **Safari & iOS Playback:** iPhone, iPad and Safari can't play the progressive MP4 used for MKV remuxing, so BitPlay detects WebKit browsers and serves the video as on-demand HLS instead, re-encoding on the fly to H.264 + AAC. Seeking works natively. See [Safari and iOS playback](#safari-and-ios-playback).
 *   **Web-Based UI:** Access and control BitPlay through a user-friendly web interface.
 *   **Proxy Support:** Configure a SOCKS5 proxy for all torrent-related traffic (fetching metadata, peer connections). (Note: HTTP proxies are not currently supported).

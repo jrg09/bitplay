@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="assets/video-js.min.css" />
     <link rel="stylesheet" href="assets/butterup.min.css" />
     <link rel="stylesheet" href="assets/output.css" />
+    <link rel="stylesheet" href="assets/app.css" />
     <script>
       // set theme mode
       if (localStorage.getItem("theme") === "dark") {
@@ -65,196 +66,100 @@
   </head>
 
   <body>
-    <main
-      class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 flex flex-col items-center"
-    >
-      <div class="flex justify-between w-full gap-4 mb-8 md:mb-15">
-        <div class="flex items-center gap-3">
-          <img src="assets/bitplay_logo.png" alt="logo" class="h-12 w-auto" />
-          <span class="text-[24px] font-semibold">bitplay</span>
-        </div>
-        <div class="flex items-center gap-4">
-          <button
-            type="button"
-            id="user-chip"
-            class="hidden text-sm font-medium cursor-pointer hover:underline"
-            title="Change your display name"
-          ></button>
-          <button
-            class="inline-flex items-center cursor-pointer justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&amp;_svg]:pointer-events-none [&amp;_svg:not([class*='size-'])]:size-4 shrink-0 [&amp;_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 size-10"
-            type="button"
-            id="toggle_theme"
-          ></button>
-          <button
-            class="inline-flex h-10 px-3 items-center cursor-pointer justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&amp;_svg]:pointer-events-none [&amp;_svg:not([class*='size-'])]:size-4 shrink-0 [&amp;_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50"
-            type="button"
-            id="settings-btn"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              class="lucide lucide-settings2 w-4 h-4"
-            >
-              <path d="M20 7h-9"></path>
-              <path d="M14 17H5"></path>
-              <circle cx="17" cy="17" r="3"></circle>
-              <circle cx="7" cy="7" r="3"></circle>
-            </svg>
-            Settings
-          </button>
-        </div>
-      </div>
-      <h1
-        class="mb-8 text-3xl leading-[1.2] md:text-5xl max-w-xl text-center font-semibold bg-gradient-to-r from-primary to-[#00CCFF] text-transparent bg-clip-text"
-      >
-        Stream torrents with ease
-      </h1>
-      <div id="search-wrapper" class="w-full">
-        <form id="search-form" class="w-full flex items-center gap-3">
+    <header class="bp-topbar">
+      <a id="bp-logo" class="bp-logo" href="/" title="Home">
+        <img src="assets/bitplay_logo.png" alt="" />
+        <span>bitplay</span>
+      </a>
+      <div id="search-wrapper" class="bp-search-wrap">
+        <form id="search-form" class="bp-search">
           <input
-            class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive h-12 overflow-ellipsis overflow-hidden"
-            placeholder="Search movies and TV, or paste a magnet link"
             id="search"
             name="search"
             type="search"
+            autocomplete="off"
+            placeholder="Search movies and TV, or paste a magnet link"
+            aria-label="Search"
           />
-          <select
-            id="search-category"
-            aria-label="Category"
-            class="dark:bg-input/30 border-input flex min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs outline-none md:text-sm h-12"
-          >
+          <select id="search-category" aria-label="Category">
             <option value="all">All</option>
             <option value="movies">Movies</option>
             <option value="tv">TV</option>
           </select>
           <button class="btn" type="submit">Search</button>
         </form>
-        <div
-          id="search-result"
-          class="mt-4 border rounded-lg overflow-auto bg-accent/50 hidden"
-          style="max-height: 75vh"
-        >
-          <!-- one card per title (poster, year, IMDb) with its torrents -->
-          <div id="search-groups" class="flex flex-col"></div>
-          <p
-            id="search-empty"
-            class="hidden p-3 text-center text-sm text-muted-foreground"
-          >
-            No results found
-          </p>
-        </div>
-        <div id="search-pagination" class="hidden"></div>
       </div>
-      <!-- series view: seasons and episodes (series.go, index.js openSeries) -->
-      <div
-        id="series-view"
-        class="hidden w-full mt-6 border rounded-lg p-3 flex flex-col gap-3"
-      ></div>
-      <!-- magnet box replaced by the search box (a pasted magnet plays);
-           kept hidden because startPlayback() reads #magnet -->
-      <form id="torrent-form" class="hidden w-full flex items-center gap-3">
-        <div class="relative w-full">
-          <input
-            class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive h-12 pr-12 overflow-ellipsis overflow-hidden"
-            placeholder="Magnet link"
-            id="magnet"
-            name="magnet"
-          />
-          <button
-            id="copy_magnet"
-            class="inline-flex items-center cursor-pointer justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&amp;_svg]:pointer-events-none [&amp;_svg:not([class*='size-'])]:size-4 shrink-0 [&amp;_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 size-10 absolute right-0 top-0 h-full w-12"
-            type="button"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              class="lucide lucide-clipboard-paste size-5"
-            >
-              <path
-                d="M15 2H9a1 1 0 0 0-1 1v2c0 .6.4 1 1 1h6c.6 0 1-.4 1-1V3c0-.6-.4-1-1-1Z"
-              ></path>
-              <path
-                d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2M16 4h2a2 2 0 0 1 2 2v2M11 14h10"
-              ></path>
-              <path d="m17 10 4 4-4 4"></path>
-            </svg>
-          </button>
+      <div class="bp-actions">
+        <button type="button" id="add-btn" class="bp-icon-btn" title="Open a .torrent file" aria-label="Open a .torrent file">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+        </button>
+        <button type="button" id="toggle_theme" class="bp-icon-btn" title="Light / dark" aria-label="Toggle theme"></button>
+        <button type="button" id="user-chip" class="bp-user hidden" title="Change your display name"></button>
+        <button type="button" id="settings-btn" class="bp-icon-btn" title="Settings" aria-label="Settings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="bp-main">
+      <h1 id="greeting" class="bp-greeting"></h1>
+
+      <!-- home: Continue watching + rows of titles (featured.go, catalogs.go) -->
+      <div id="home">
+        <section id="library-wrapper" class="hidden bp-section">
+          <h2 class="bp-h">Continue watching</h2>
+          <div id="library-row" class="bp-row"></div>
+          <details class="bp-manage">
+            <summary>Manage downloads</summary>
+            <div id="library-list" class="w-full border rounded-lg"></div>
+          </details>
+        </section>
+        <div id="home-rows"></div>
+      </div>
+
+      <!-- search results: one poster per title, click for its torrents -->
+      <section id="search-result" class="hidden">
+        <div class="bp-results-head">
+          <button type="button" id="back-home" class="bp-link">&larr; Home</button>
+          <span id="results-title" class="bp-muted"></span>
         </div>
+        <div id="search-groups" class="bp-grid"></div>
+        <p id="search-empty" class="hidden bp-muted" style="padding: 24px 0; text-align: center">
+          No results found
+        </p>
+        <div id="search-pagination" class="hidden"></div>
+      </section>
+
+      <!-- the search box doubles as the magnet box; this stays hidden
+           because startPlayback() reads #magnet -->
+      <form id="torrent-form" class="hidden">
+        <input id="magnet" name="magnet" />
+        <button id="copy_magnet" type="button"></button>
         <button class="btn" type="submit">Play Now</button>
       </form>
-      <div id="library-wrapper" class="hidden w-full mt-6 flex flex-col gap-3">
-        <span class="text-muted-foreground text-sm font-semibold"
-          >Continue watching</span
-        >
-        <div id="library-list" class="w-full border rounded-lg"></div>
-      </div>
-      <!-- Featured titles from YTS / TPB (featured.go) and streaming catalogs (catalogs.go) -->
-      <div id="featured-wrapper" class="w-full mt-6 flex flex-col gap-3">
-        <div class="flex items-center gap-2" style="flex-wrap: wrap">
-          <span class="text-muted-foreground text-sm font-semibold"
-            >Featured</span
-          >
-            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="popular">Popular</button>
-            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="recent">Recently added</button>
-            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="top-movies">Top movies</button>
-            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="top-tv">Top TV</button>
-        </div>
-        <div class="flex items-center gap-2" style="flex-wrap: wrap">
-          <span class="text-muted-foreground text-sm font-semibold"
-            >Streaming</span
-          >
-            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="stream:nfx">Netflix</button>
-            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="stream:nfx-top">Netflix Top 10</button>
-            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="stream:hbm">HBO Max</button>
-            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="stream:dnp">Disney+</button>
-            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="stream:amp">Prime Video</button>
-            <button type="button" class="featured-tab px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-list="stream:atp">Apple TV+</button>
-          <span class="flex items-center" style="margin-left: auto; gap: 4px">
-            <button type="button" class="stream-type px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-type="movie">Movies</button>
-            <button type="button" class="stream-type px-3 py-1 rounded-lg border bg-muted text-sm cursor-pointer" data-type="series">Series</button>
-          </span>
-        </div>
-        <div id="featured-detail" class="hidden border rounded-lg p-3"></div>
-        <p id="featured-status" class="text-sm text-muted-foreground"></p>
-        <div
-          id="featured-grid"
-          style="
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-            gap: 12px;
-          "
-        ></div>
-      </div>
+    </main>
+
+    <div id="bp-backdrop" class="hidden"></div>
+
+    <!-- title details: poster, rating and torrents (index.js showFeaturedDetail) -->
+    <div id="featured-detail" class="hidden bp-sheet"></div>
+    <!-- seasons and episodes (series.go, index.js openSeries) -->
+    <div id="series-view" class="hidden bp-sheet flex flex-col gap-3"></div>
+
+    <!-- open a .torrent file -->
+    <div id="add-sheet" class="hidden bp-sheet bp-sheet-narrow">
+      <button type="button" class="bp-link bp-close" data-close-sheet>Close</button>
+      <h2 class="bp-h">Open a torrent file</h2>
+      <p class="bp-muted" style="margin-bottom: 12px">
+        To play a magnet link, paste it in the search box.
+      </p>
       <div
         id="torrent_file_wrapper"
-        class="w-full relative rounded-lg p-3 py-10 text-center flex flex-col items-center gap-4 justify-center text-sm font-semibold text-accent-foreground mt-7 border-2 border-foreground/30 border-dashed bg-secondary/50 cursor-pointer hover:bg-transparent transition-all"
+        class="w-full relative rounded-lg p-3 py-10 text-center flex flex-col items-center gap-4 justify-center text-sm font-semibold text-accent-foreground border-2 border-foreground/30 border-dashed"
       >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="24"
-          height="24"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="lucide lucide-upload size-12 text-primary"
-        >
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-upload size-12 text-primary">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
           <polyline points="17 8 12 3 7 8"></polyline>
           <line x1="12" x2="12" y1="3" y2="15"></line>
@@ -263,28 +168,24 @@
           >Drag and drop your torrent file here, or
           <span class="text-primary">Browse</span>
         </span>
-        <input
-          type="file"
-          class="opacity-0 size-full z-[1] absolute cursor-pointer"
-          accept=".torrent"
-          id="torrent_file"
-        />
+        <input type="file" class="opacity-0 size-full z-[1] absolute cursor-pointer" accept=".torrent" id="torrent_file" />
       </div>
-      <video id="video-player" class="video-js mt-10 w-full"></video>
-      <div id="subtitle-upload-wrapper" class="hidden w-full mt-3 flex justify-end">
-        <label
-          for="subtitle-file"
-          class="text-sm font-medium text-primary cursor-pointer"
-          >+ Add subtitle file (.srt / .vtt)</label
-        >
-        <input
-          type="file"
-          id="subtitle-file"
-          accept=".srt,.vtt"
-          class="hidden"
-        />
+    </div>
+
+    <!-- player: full screen over the page while something plays -->
+    <div id="player-overlay" class="hidden">
+      <div class="bp-player-bar">
+        <button type="button" id="player-close" class="bp-link">&larr; Back</button>
+        <span id="subtitle-upload-wrapper" class="hidden">
+          <label for="subtitle-file" class="bp-link" style="cursor: pointer">+ Add subtitle file (.srt / .vtt)</label>
+          <input type="file" id="subtitle-file" accept=".srt,.vtt" class="hidden" />
+        </span>
       </div>
-    </main>
+      <div id="player-stage">
+        <video id="video-player" class="video-js"></video>
+      </div>
+    </div>
+
     <div id="settings-model" class="fixed inset-0 z-[999] flex flex-col hidden">
       <!-- model overlay -->
       <div class="close-settings absolute inset-0 bg-black/70"></div>
