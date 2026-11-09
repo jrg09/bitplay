@@ -878,6 +878,10 @@ func torrentHandler(w http.ResponseWriter, r *http.Request) {
 		handleRemux(w, r, session, sessionID, parts[6])
 		return
 	}
+	if len(parts) > 7 && parts[5] == "hls" {
+		handleHLS(w, r, session, sessionID, parts[6], parts[7])
+		return
+	}
 
 	// If there's a streaming request, handle it
 	if len(parts) > 5 && parts[5] == "stream" { // Changed from parts[4] to parts[5]
@@ -1162,7 +1166,27 @@ func handleProbe(w http.ResponseWriter, r *http.Request, session *TorrentSession
 	respondWithJSON(w, http.StatusOK, result)
 }
 
-// Stream-copy remux into progressive fragmented MP4. ?audio=N picks an
+// videoArgs returns the ffmpeg video options: stream copy by default, or a
+// CPU H.264 8-bit re-encode (what every Safari/iOS version plays) when
+// transcode is set.
+func videoArgs(transcode bool, videoCodec string) []string {
+	if transcode {
+		return []string{
+			"-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+			"-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
+			// frequent keyframes so the fragmented MP4 starts playing quickly
+			"-force_key_frames", "expr:gte(t,n_forced*2)",
+		}
+	}
+	args := []string{"-c:v", "copy"}
+	if videoCodec == "hevc" {
+		args = append(args, "-tag:v", "hvc1") // Safari rejects the default hev1 tag
+	}
+	return args
+}
+
+// Remux into progressive fragmented MP4 (video stream copy, or a re-encode
+// with ?transcode=1). ?audio=N picks an
 // audio track, ?t=S restarts from an offset.
 func handleRemux(w http.ResponseWriter, r *http.Request, session *TorrentSession, sessionID, indexStr string) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -1195,6 +1219,10 @@ func handleRemux(w http.ResponseWriter, r *http.Request, session *TorrentSession
 		}
 	}
 
+	// ?transcode=1: Safari/iOS can't play what the browser claims to decode
+	// (HEVC, 10-bit H.264...), so re-encode to H.264 8-bit + AAC
+	transcode := r.URL.Query().Get("transcode") == "1"
+
 	select {
 	case remuxSlots <- struct{}{}:
 		defer func() { <-remuxSlots }()
@@ -1225,6 +1253,10 @@ func handleRemux(w http.ResponseWriter, r *http.Request, session *TorrentSession
 	audioArgs := []string{"-c:a", "copy"}
 	switch audioCodec {
 	case "", "aac", "mp3", "opus", "flac", "vorbis":
+		if transcode && audioCodec != "" && audioCodec != "aac" && audioCodec != "mp3" {
+			// WebKit only reliably plays AAC/MP3 inside MP4
+			audioArgs = []string{"-c:a", "aac", "-b:a", "192k", "-ac", "2"}
+		}
 	default:
 		audioArgs = []string{"-c:a", "aac", "-b:a", "192k", "-ac", "2"}
 	}
@@ -1242,12 +1274,9 @@ func handleRemux(w http.ResponseWriter, r *http.Request, session *TorrentSession
 	} else {
 		args = append(args, "-map", "0:a:0?")
 	}
-	args = append(args, "-c:v", "copy")
+	args = append(args, videoArgs(transcode, videoCodec)...)
 	args = append(args, audioArgs...)
 	args = append(args, "-sn")
-	if videoCodec == "hevc" {
-		args = append(args, "-tag:v", "hvc1") // Safari rejects the default hev1 tag
-	}
 	args = append(args,
 		"-avoid_negative_ts", "make_zero",
 		"-movflags", "frag_keyframe+empty_moov+default_base_moof",

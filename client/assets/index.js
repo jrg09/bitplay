@@ -148,6 +148,25 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     return type ? codecProbeEl.canPlayType(type) !== "" : false;
   };
 
+  // Every browser on iOS/iPadOS is WebKit, and desktop Safari is too; they
+  // report canPlayType "maybe" for things they then fail to play
+  const isWebKitOnly = (() => {
+    const ua = navigator.userAgent;
+    const ios =
+      /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const safari =
+      /Safari\//.test(ua) && !/Chrome|Chromium|CriOS|FxiOS|Edg|OPR|Android/.test(ua);
+    return ios || safari;
+  })();
+  // H.264 8-bit (+ AAC/MP3) is the only combination safe on every WebKit
+  const H264_SAFE_PROFILES = /^(baseline|constrained baseline|main|extended|high)$/i;
+  const webkitNeedsTranscode = (video, audio) => {
+    if (video.codec !== "h264") return true;
+    if (video.profile && !H264_SAFE_PROFILES.test(video.profile)) return true;
+    return false;
+  };
+
   const pickSource = async (sessionId, file) => {
     const directUrl = "/api/v1/torrent/" + sessionId + "/stream/" + file.index;
     const ext = file.name.split(".").pop().toLowerCase();
@@ -188,21 +207,51 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       return fallback;
     }
 
-    const videoOk = canDecode(video.codec);
-    const audioOk = !defaultAudio || canDecode(defaultAudio.codec);
+    const transcode = isWebKitOnly && webkitNeedsTranscode(video, defaultAudio);
+    const videoOk = transcode || canDecode(video.codec);
+    const audioOk =
+      !defaultAudio ||
+      (isWebKitOnly
+        ? ["aac", "mp3"].includes(defaultAudio.codec) || transcode
+        : canDecode(defaultAudio.codec));
     const nativeContainer = ext === "mp4" || ext === "m4v" || ext === "webm";
 
     if (!videoOk) {
       return { mode: "unsupported", probe, video, directUrl };
     }
-    if (nativeContainer && audioOk) {
+    if (nativeContainer && audioOk && !transcode) {
       return { ...fallback, probe };
+    }
+
+    // iOS/Safari refuse the progressive remux stream (no Range support) but
+    // play HLS natively; the server encodes H.264 + AAC segments on demand
+    if (isWebKitOnly) {
+      const hlsUrl = (audio) =>
+        "/api/v1/torrent/" +
+        sessionId +
+        "/hls/" +
+        file.index +
+        "/index.m3u8" +
+        (audio != null ? "?audio=" + audio : "");
+      const currentAudio = defaultAudio ? defaultAudio.index : null;
+      return {
+        mode: "hls",
+        src: hlsUrl(currentAudio),
+        type: "application/x-mpegURL",
+        probe,
+        video,
+        audios,
+        hlsUrl,
+        directUrl,
+        currentAudio,
+      };
     }
 
     const remuxUrl = (opts = {}) => {
       const params = new URLSearchParams();
       if (opts.audio != null) params.set("audio", opts.audio);
       if (opts.t) params.set("t", opts.t.toFixed(3));
+      if (transcode) params.set("transcode", "1");
       const qs = params.toString();
       return (
         "/api/v1/torrent/" +
@@ -223,7 +272,13 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
       remuxUrl,
       directUrl,
       currentAudio,
-      audioWarning: !audioOk,
+      // the server re-encodes AC3/EAC3/DTS/TrueHD to AAC, only codecs it
+      // stream-copies can still be undecodable here
+      audioWarning:
+        !audioOk &&
+        !!defaultAudio &&
+        ["opus", "flac", "vorbis", "aac", "mp3"].includes(defaultAudio.codec),
+      transcoding: transcode,
       audioCodec: defaultAudio ? defaultAudio.codec : null,
     };
   };
@@ -360,7 +415,24 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
     }
     removeExternalPanel();
 
-    if (chosen.mode === "remux") {
+    if (chosen.mode === "hls") {
+      if (player.__origCurrentTime) {
+        delete player.currentTime;
+        delete player.duration;
+      }
+      // switching audio re-requests the playlist, keep the position
+      chosen.reload = (t) => {
+        player.src({ src: chosen.hlsUrl(chosen.currentAudio), type: chosen.type });
+        player.one("loadedmetadata", () => {
+          if (t) player.currentTime(t);
+          player.play();
+        });
+      };
+      chosen.getAbsoluteTime = () => player.currentTime() || 0;
+      if (chosen.audios && chosen.audios.length > 1) {
+        buildAudioSelect(chosen);
+      }
+    } else if (chosen.mode === "remux") {
       attachRemuxPlayback(chosen);
       if (chosen.audios && chosen.audios.length > 1) {
         buildAudioSelect(chosen);
@@ -1136,7 +1208,9 @@ videojs.registerPlugin('doubleTapFF', doubleTapFF);
         }],
         tracks: subtitles,
         html5: {
-          nativeTextTracks: false
+          // iOS plays video in its native player, which only shows native
+          // text tracks; video.js' own overlay is invisible there
+          nativeTextTracks: isWebKitOnly
         },
         plugins: {
           hotkeys: {
