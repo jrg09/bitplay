@@ -8,6 +8,7 @@ BitPlay is a web application built with Go that allows you to stream video conte
 
 *   **Direct Torrent Streaming:** Stream video files from magnet links or torrent files directly without needing to download them completely first.
 *   **MKV & Audio Track Support:** MKV files are remuxed on the fly with ffmpeg (no re-encoding), and files with multiple audio tracks get a track picker. If a codec genuinely can't play in your browser, BitPlay tells you which one and gives you the stream URL to open in VLC or mpv instead.
+*   **Safari & iOS Playback:** iPhone, iPad and Safari can't play the progressive MP4 used for MKV remuxing, so BitPlay detects WebKit browsers and serves the video as on-demand HLS instead, re-encoding on the fly to H.264 + AAC. Seeking works natively. See [Safari and iOS playback](#safari-and-ios-playback).
 *   **Web-Based UI:** Access and control BitPlay through a user-friendly web interface.
 *   **Proxy Support:** Configure a SOCKS5 proxy for all torrent-related traffic (fetching metadata, peer connections). (Note: HTTP proxies are not currently supported).
 *   **Prowlarr Integration:** Connect to your Prowlarr instance to search across your configured indexers directly within BitPlay.
@@ -28,7 +29,7 @@ You can run BitPlay either directly using Go or via Docker Compose.
 ### Prerequisites
 
 *   **Go:** Requires Go 1.25 or later (if running locally).
-*   **ffmpeg:** Optional for local runs; it enables MKV remuxing and audio track selection. The Docker image already includes it.
+*   **ffmpeg:** Optional for local runs; it enables MKV remuxing, audio track selection and Safari/iOS playback (the latter needs an ffmpeg build with `libx264`). The Docker image already includes it.
 *   **Docker & Docker Compose:** Required if running with Docker.
 
 ### Running Locally with Go
@@ -162,12 +163,22 @@ Use **Test Connection** to validate the credentials. Notes:
 *   Credentials are stored in `config/settings.json` (mode `0600`) and are never sent back to the browser.
 *   The OpenSubtitles API is reached through the configured SOCKS5 proxy if one is enabled.
 
+### Safari and iOS playback
+
+Every browser on iOS/iPadOS is WebKit, and desktop Safari is too. They report support for codecs they then fail to play, and iOS rejects the progressive fragmented MP4 that BitPlay uses for MKV remuxing (it requires HTTP Range support). BitPlay therefore picks a different path for them:
+
+*   **Detection:** done in the browser (user agent, plus touch points to catch iPadOS, which presents itself as a Mac). Chrome and Firefox on iOS are covered too.
+*   **Direct play:** an MP4/M4V with H.264 (Baseline/Main/High, 8-bit) and AAC or MP3 audio is still served as is, with Range support.
+*   **HLS otherwise:** `/api/v1/torrent/<session>/hls/<file>/index.m3u8` returns a complete VOD playlist built from the probed duration. Each 6 second MPEG-TS segment (`segN.ts`) is encoded by its own ffmpeg when first requested: H.264 8-bit (`libx264`, `veryfast`) plus stereo AAC, so HEVC, 10-bit, VP9, AV1 and AC3/EAC3/DTS audio all play. `?audio=N` selects an audio track.
+*   **Cost:** video is always re-encoded for these clients, so each playback uses CPU on the server (roughly 1 s of ffmpeg per 6 s segment for 1080p on a modern x86 CPU). Encodes share the `BITPLAY_MAX_REMUX` slots and the last 256 MB of segments are cached in memory.
+*   **Subtitles:** WebKit uses native text tracks, so subtitles appear in the iOS player's own menu.
+
 ### Environment Variables
 
 | Variable | Description |
 | --- | --- |
 | `BITPLAY_AUTH_USERNAME` / `BITPLAY_AUTH_PASSWORD` | Set both to protect the entire app (UI, API, and video streams) with HTTP basic auth. Recommended for instances exposed to the internet. |
-| `BITPLAY_MAX_REMUX` | Maximum concurrent ffmpeg remux streams (default `3`). |
+| `BITPLAY_MAX_REMUX` | Maximum concurrent ffmpeg jobs: remux streams and Safari/iOS HLS segment encodes (default `3`). |
 
 Example with Docker Compose:
 
